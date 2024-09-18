@@ -1,0 +1,34 @@
+# Virtual environment folder
+.venv
+
+# Python bytecode files (compiled)
+__pycache__/
+*.py[cod]
+
+# Virtual environment configuration
+pyvenv.cfg
+
+# Logs and databases
+*.log
+*.sqlite
+*.db
+
+# Model files and large data files (optional)
+*.joblib
+spam_model.joblib
+
+# Environment variables
+.env
+*.env
+
+# Jupyter Notebook checkpoints (if you're using notebooks)
+.ipynb_checkpoints/
+
+# OS-specific files (optional)
+.DS_Store
+Thumbs.db
+
+# IDE-specific files (if using VSCode or other IDEs)
+.vscode/
+.idea/
+RAW_recipes.csv

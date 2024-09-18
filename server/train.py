@@ -1,0 +1,151 @@
+import tensorflow as tf
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from custom_model import create_food_classification_model
+from datasets import load_dataset
+import logging
+import numpy as np
+from PIL import Image
+import matplotlib.pyplot as plt
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Set random seed for reproducibility
+tf.random.set_seed(42)
+
+# Image and model configuration
+IMG_SIZE = (224, 224)
+BATCH_SIZE = 32
+EPOCHS = 10
+
+# Check if GPU is available and log the info
+physical_devices = tf.config.list_physical_devices('GPU')
+if physical_devices:
+    logging.info(f"TensorFlow detected {len(physical_devices)} GPU(s): {physical_devices}")
+    # Set memory growth to avoid TensorFlow using all GPU memory
+    for gpu in physical_devices:
+        tf.config.experimental.set_memory_growth(gpu, True)
+else:
+    logging.warning("No GPU detected, training will use the CPU.")
+
+# Load the Food101 dataset
+logging.info("Loading the Food101 dataset...")
+ds = load_dataset("ethz/food101")
+
+num_classes = ds['train'].features['label'].num_classes
+
+# Function to preprocess the image data
+def preprocess_image(batch):
+    images = batch['image']  
+    labels = batch['label']  
+    resized_images = []
+
+    if len(images) != len(labels):
+        raise ValueError(f"Mismatch between number of images ({len(images)}) and labels ({len(labels)})")
+
+    for img in images:
+        if isinstance(img, Image.Image):
+            img = img.resize(IMG_SIZE) 
+            img = np.array(img, dtype=np.float32)  
+            img = preprocess_input(img)  
+            resized_images.append(img)
+        else:
+            resized_images.append(np.zeros((*IMG_SIZE, 3), dtype=np.float32))
+
+    resized_images = [img for img in resized_images if img.shape == (*IMG_SIZE, 3)]
+
+    if len(resized_images) != len(labels):
+        min_length = min(len(resized_images), len(labels))
+        resized_images = resized_images[:min_length]
+        labels = labels[:min_length]
+
+    if len(resized_images) == 0:
+        raise ValueError("No valid images found in the batch after resizing.")
+
+    batch['image'] = np.stack(resized_images)  
+    batch['label'] = np.array(labels)  
+    return batch
+
+# Preprocess the dataset
+logging.info("Preprocessing the dataset in batches...")
+train_ds = ds['train'].map(preprocess_image, batched=True, batch_size=BATCH_SIZE)
+validation_ds = ds['validation'].map(preprocess_image, batched=True, batch_size=BATCH_SIZE)
+
+# Convert dataset to TensorFlow dataset
+def to_tf_dataset(dataset):
+    def generator():
+        for example in dataset:
+            label = tf.one_hot(example['label'], depth=num_classes)
+            yield example['image'], label
+    
+    return tf.data.Dataset.from_generator(
+        generator,
+        output_signature=(
+            tf.TensorSpec(shape=(IMG_SIZE[0], IMG_SIZE[1], 3), dtype=tf.float32),
+            tf.TensorSpec(shape=(num_classes,), dtype=tf.float32)  
+        )
+    ).batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+
+# Convert train and validation datasets
+train_tf_dataset = to_tf_dataset(train_ds)
+validation_tf_dataset = to_tf_dataset(validation_ds)
+
+# Create the model
+logging.info("Creating and compiling the model...")
+model = create_food_classification_model((*IMG_SIZE, 3), num_classes)
+
+# Callbacks for early stopping and learning rate reduction
+early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
+
+# Training the model
+try:
+    logging.info("Training the model...")
+    history = model.fit(
+        train_tf_dataset,
+        validation_data=validation_tf_dataset,
+        epochs=EPOCHS,
+        callbacks=[early_stopping, reduce_lr]
+    )
+
+    # Save the model
+    model.save('food_classification_model.h5')
+    logging.info("Model saved as 'food_classification_model.h5'")
+
+    # Save class names
+    class_names = ds['train'].features['label'].names
+    with open('class_names.txt', 'w') as f:
+        for name in class_names:
+            f.write(f"{name}\n")
+    logging.info("Class names saved to 'class_names.txt'")
+
+    # Plot training history
+    plt.figure(figsize=(12, 4))
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['accuracy'], label='Training Accuracy')
+    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+    plt.title('Model Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend()
+
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history['loss'], label='Training Loss')
+    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.title('Model Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig('training_history.png')
+    logging.info("Training history plot saved as 'training_history.png'")
+
+    # Evaluate the model
+    evaluation = model.evaluate(validation_tf_dataset)
+    logging.info(f"Validation Loss: {evaluation[0]:.4f}")
+    logging.info(f"Validation Accuracy: {evaluation[1]:.4f}")
+
+except Exception as e:
+    logging.error(f"An error occurred during training: {str(e)}")
