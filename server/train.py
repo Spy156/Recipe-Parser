@@ -1,6 +1,6 @@
 import tensorflow as tf
 from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 from custom_model import create_food_classification_model
 from datasets import load_dataset
 import logging
@@ -34,9 +34,9 @@ if physical_devices:
 else:
     logging.warning("No GPU detected, training will use the CPU.")
 
-# Load the Food101 dataset
-logging.info("Loading the Food101 dataset...")
-ds = load_dataset("ethz/food101")
+# Load the Food101 dataset without caching to disk
+logging.info("Loading the Food101 dataset without caching...")
+ds = load_dataset("ethz/food101", split=['train', 'validation'], cache_dir='/tmp/food101')  # cache to a tmp directory
 
 num_classes = ds['train'].features['label'].num_classes
 
@@ -88,7 +88,7 @@ logging.info("Preprocessing the dataset in batches...")
 train_ds = subset_train.map(preprocess_image, batched=True, batch_size=BATCH_SIZE)
 validation_ds = subset_validation.map(preprocess_image, batched=True, batch_size=BATCH_SIZE)
 
-# Convert dataset to TensorFlow dataset
+# Convert dataset to TensorFlow dataset without storing any intermediate files
 def to_tf_dataset(dataset):
     def generator():
         for example in dataset:
@@ -111,26 +111,27 @@ validation_tf_dataset = to_tf_dataset(validation_ds)
 logging.info("Creating and compiling the model...")
 model = create_food_classification_model((*IMG_SIZE, 3), num_classes)
 
-# Callbacks for early stopping and learning rate reduction
-early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
-reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
+# Callbacks: Save only the best model and reduce unnecessary checkpoints
+model_checkpoint = ModelCheckpoint(
+    'food_classification_best_model.h5', save_best_only=True, monitor='val_loss', verbose=1
+)
 
-# Training the model
+# Callbacks for early stopping and learning rate reduction
+early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=1e-6)
+
+# Training the model with minimal disk usage
 try:
     logging.info("Training the model...")
     history = model.fit(
         train_tf_dataset,
         validation_data=validation_tf_dataset,
         epochs=EPOCHS,
-        callbacks=[early_stopping, reduce_lr]
+        callbacks=[early_stopping, reduce_lr, model_checkpoint]
     )
 
-    # Save the model
-    model.save('food_classification_model.h5')
-    logging.info("Model saved as 'food_classification_model.h5'")
-
-    # Save class names
-    class_names = ds['train'].features['label'].names
+    # Save class names to memory-efficient file
+    class_names = ds[0].features['label'].names
     with open('class_names.txt', 'w') as f:
         for name in class_names:
             f.write(f"{name}\n")
