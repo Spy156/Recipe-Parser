@@ -7,6 +7,10 @@ import logging
 import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
+import random
+
+gpus = tf.config.experimental.list_physical_devices('GPU')
+tf.config.experimental.set_memory_growth(gpus[0], True)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -16,14 +20,15 @@ tf.random.set_seed(42)
 
 # Image and model configuration
 IMG_SIZE = (224, 224)
-BATCH_SIZE = 32
+BATCH_SIZE = 16
 EPOCHS = 10
+N_TRAIN_SAMPLES = 1000  # Number of training samples to take
+N_VALIDATION_SAMPLES = 500  # Number of validation samples to take
 
 # Check if GPU is available and log the info
 physical_devices = tf.config.list_physical_devices('GPU')
 if physical_devices:
     logging.info(f"TensorFlow detected {len(physical_devices)} GPU(s): {physical_devices}")
-    # Set memory growth to avoid TensorFlow using all GPU memory
     for gpu in physical_devices:
         tf.config.experimental.set_memory_growth(gpu, True)
 else:
@@ -35,10 +40,21 @@ ds = load_dataset("ethz/food101")
 
 num_classes = ds['train'].features['label'].num_classes
 
+# Reduce the number of samples using random sampling
+logging.info(f"Reducing the dataset to {N_TRAIN_SAMPLES} training samples and {N_VALIDATION_SAMPLES} validation samples...")
+
+# Randomly select train and validation sample indices
+train_indices = random.sample(range(len(ds['train'])), N_TRAIN_SAMPLES)
+validation_indices = random.sample(range(len(ds['validation'])), N_VALIDATION_SAMPLES)
+
+# Select the subset of the dataset
+subset_train = ds['train'].select(train_indices)
+subset_validation = ds['validation'].select(validation_indices)
+
 # Function to preprocess the image data
 def preprocess_image(batch):
-    images = batch['image']  
-    labels = batch['label']  
+    images = batch['image']
+    labels = batch['label']
     resized_images = []
 
     if len(images) != len(labels):
@@ -46,9 +62,9 @@ def preprocess_image(batch):
 
     for img in images:
         if isinstance(img, Image.Image):
-            img = img.resize(IMG_SIZE) 
-            img = np.array(img, dtype=np.float32)  
-            img = preprocess_input(img)  
+            img = img.resize(IMG_SIZE)
+            img = np.array(img, dtype=np.float32)
+            img = preprocess_input(img)
             resized_images.append(img)
         else:
             resized_images.append(np.zeros((*IMG_SIZE, 3), dtype=np.float32))
@@ -63,14 +79,14 @@ def preprocess_image(batch):
     if len(resized_images) == 0:
         raise ValueError("No valid images found in the batch after resizing.")
 
-    batch['image'] = np.stack(resized_images)  
-    batch['label'] = np.array(labels)  
+    batch['image'] = np.stack(resized_images)
+    batch['label'] = np.array(labels)
     return batch
 
-# Preprocess the dataset
+# Preprocess the subset of the dataset
 logging.info("Preprocessing the dataset in batches...")
-train_ds = ds['train'].map(preprocess_image, batched=True, batch_size=BATCH_SIZE)
-validation_ds = ds['validation'].map(preprocess_image, batched=True, batch_size=BATCH_SIZE)
+train_ds = subset_train.map(preprocess_image, batched=True, batch_size=BATCH_SIZE)
+validation_ds = subset_validation.map(preprocess_image, batched=True, batch_size=BATCH_SIZE)
 
 # Convert dataset to TensorFlow dataset
 def to_tf_dataset(dataset):
@@ -78,12 +94,12 @@ def to_tf_dataset(dataset):
         for example in dataset:
             label = tf.one_hot(example['label'], depth=num_classes)
             yield example['image'], label
-    
+
     return tf.data.Dataset.from_generator(
         generator,
         output_signature=(
             tf.TensorSpec(shape=(IMG_SIZE[0], IMG_SIZE[1], 3), dtype=tf.float32),
-            tf.TensorSpec(shape=(num_classes,), dtype=tf.float32)  
+            tf.TensorSpec(shape=(num_classes,), dtype=tf.float32)
         )
     ).batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
 

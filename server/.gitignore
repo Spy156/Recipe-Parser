@@ -1,8 +1,10 @@
 # Virtual environment folder
 .venv
+venv
 
 # Python bytecode files (compiled)
 __pycache__/
+__pycache__
 *.py[cod]
 
 # Virtual environment configuration
