@@ -3,7 +3,6 @@ from flask_cors import CORS
 from recipe_parser import RecipeParser
 import tensorflow as tf
 from tensorflow.keras.applications import MobileNetV2
-from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.image import img_to_array
 import numpy as np
 import os
@@ -15,7 +14,7 @@ import logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "http://localhost:5000"}})
+CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}})
 
 recipe_parser = RecipeParser()
 
@@ -24,7 +23,7 @@ try:
     logging.info("Model loaded successfully")
 except Exception as e:
     logging.error(f"Error loading model: {str(e)}")
-    # You might want to exit the script here or handle the error appropriately
+    raise
 
 try:
     with open('class_names.txt', 'r') as f:
@@ -32,7 +31,7 @@ try:
     logging.info(f"Loaded {len(class_names)} class names")
 except Exception as e:
     logging.error(f"Error loading class names: {str(e)}")
-    class_names = []
+    raise
 
 if os.path.exists('recipe_model.joblib'):
     recipe_parser.load_model()
@@ -84,7 +83,12 @@ def analyze_image():
         # Get recipe for the top prediction
         top_dish = class_names[top_3_indices[0]]
         recipe = recipe_parser.predict(top_dish, 4)
-        logging.info(f"Recipe generated for {top_dish}")
+        
+        if recipe is None:
+            logging.warning(f"Could not generate recipe for {top_dish}")
+            recipe = {"name": top_dish, "ingredients": [], "instructions": [], "servings": 4}
+        else:
+            logging.info(f"Recipe generated for {top_dish}")
 
         return jsonify({
             'predictions': result,
