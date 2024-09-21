@@ -5,6 +5,7 @@ from tensorflow.keras.applications import MobileNetV2
 
 def create_food_classification_model(input_shape, num_classes):
     base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=input_shape)
+    base_model.trainable = False  # Freeze the base model
     x = base_model.output
     x = GlobalAveragePooling2D()(x)
     x = Dense(1024, activation='relu')(x)

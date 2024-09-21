@@ -72,13 +72,24 @@ const RecipeParser: React.FC = () => {
       const response = await axios.post('http://localhost:5000/analyze-image', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-      setImagePredictions(response.data);
-      if (response.data.length > 0) {
-        setDishName(response.data[0].class);
+      console.log('Server response:', response.data);
+      if (response.data.predictions) {
+        setImagePredictions(response.data.predictions);
+        if (response.data.predictions.length > 0) {
+          setDishName(response.data.predictions[0].class);
+        }
+      }
+      if (response.data.recipe) {
+        setRecipe(response.data.recipe);
       }
     } catch (error) {
       console.error('Error analyzing image:', error);
-      setError('An error occurred while analyzing the image. Please try again.');
+      if (axios.isAxiosError(error)) {
+        console.error('Axios error details:', error.response?.data);
+        setError(`An error occurred while analyzing the image: ${error.response?.data?.error || error.message}`);
+      } else {
+        setError('An unexpected error occurred while analyzing the image. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }
