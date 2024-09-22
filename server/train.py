@@ -9,21 +9,20 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import random
 
-gpus = tf.config.experimental.list_physical_devices('GPU')
-tf.config.experimental.set_memory_growth(gpus[0], True)
-
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Set random seed for reproducibility
 tf.random.set_seed(42)
+random.seed(42)
+np.random.seed(42)
 
 # Image and model configuration
 IMG_SIZE = (224, 224)
-BATCH_SIZE = 16
-EPOCHS = 10
-N_TRAIN_SAMPLES = 1000  # Number of training samples to take
-N_VALIDATION_SAMPLES = 500  # Number of validation samples to take
+BATCH_SIZE = 32  # Increased batch size for faster processing
+EPOCHS = 20  # Increased epochs for better learning with larger dataset
+N_TRAIN_SAMPLES = 20000  # Increased to 20,000 training samples
+N_VALIDATION_SAMPLES = 10000  # Increased to 10,000 validation samples
 
 # Check if GPU is available and log the info
 physical_devices = tf.config.list_physical_devices('GPU')
@@ -38,18 +37,21 @@ else:
 logging.info("Loading the Food101 dataset without caching...")
 ds = load_dataset("ethz/food101", split=['train', 'validation'], cache_dir='/tmp/food101')  # cache to a tmp directory
 
-num_classes = ds['train'].features['label'].num_classes
+train_ds = ds[0]
+validation_ds = ds[1]
+
+num_classes = train_ds.features['label'].num_classes
 
 # Reduce the number of samples using random sampling
-logging.info(f"Reducing the dataset to {N_TRAIN_SAMPLES} training samples and {N_VALIDATION_SAMPLES} validation samples...")
+logging.info(f"Selecting {N_TRAIN_SAMPLES} training samples and {N_VALIDATION_SAMPLES} validation samples...")
 
 # Randomly select train and validation sample indices
-train_indices = random.sample(range(len(ds['train'])), N_TRAIN_SAMPLES)
-validation_indices = random.sample(range(len(ds['validation'])), N_VALIDATION_SAMPLES)
+train_indices = random.sample(range(len(train_ds)), N_TRAIN_SAMPLES)
+validation_indices = random.sample(range(len(validation_ds)), N_VALIDATION_SAMPLES)
 
 # Select the subset of the dataset
-subset_train = ds['train'].select(train_indices)
-subset_validation = ds['validation'].select(validation_indices)
+subset_train = train_ds.select(train_indices)
+subset_validation = validation_ds.select(validation_indices)
 
 # Function to preprocess the image data
 def preprocess_image(batch):
@@ -131,7 +133,7 @@ try:
     )
 
     # Save class names to memory-efficient file
-    class_names = ds[0].features['label'].names
+    class_names = train_ds.features['label'].names
     with open('class_names.txt', 'w') as f:
         for name in class_names:
             f.write(f"{name}\n")
