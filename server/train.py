@@ -11,6 +11,9 @@ import matplotlib.pyplot as plt
 import random
 import os
 
+# Suppress TensorFlow warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
 # Enable mixed precision
 policy = mixed_precision.Policy('mixed_float16')
 mixed_precision.set_global_policy(policy)
@@ -25,15 +28,13 @@ np.random.seed(42)
 
 # Image and model configuration
 IMG_SIZE = (224, 224)
-BATCH_SIZE = 64  # Reduced batch size to potentially improve GPU utilization
+BATCH_SIZE = 64
 EPOCHS = 20
-N_TRAIN_SAMPLES = 80000  # 80% of 100k
-N_VALIDATION_SAMPLES = 20000  # 20% of 100k
 
 # Check TensorFlow GPU support
 logging.info(f"TensorFlow version: {tf.__version__}")
 logging.info(f"Is built with CUDA: {tf.test.is_built_with_cuda()}")
-logging.info(f"Is GPU available: {tf.test.is_gpu_available()}")
+logging.info(f"Num GPUs Available: {len(tf.config.list_physical_devices('GPU'))}")
 
 physical_devices = tf.config.list_physical_devices('GPU')
 if physical_devices:
@@ -45,19 +46,30 @@ else:
 
 # Load the Food101 dataset
 logging.info("Loading the Food101 dataset...")
-ds = load_dataset("ethz/food101", split=['train', 'validation'], cache_dir='/tmp/food101')
-
-train_ds = ds[0]
-validation_ds = ds[1]
-
-num_classes = train_ds.features['label'].num_classes
-
-# Randomly select train and validation samples
-train_indices = random.sample(range(len(train_ds)), N_TRAIN_SAMPLES)
-validation_indices = random.sample(range(len(validation_ds)), N_VALIDATION_SAMPLES)
-
-subset_train = train_ds.select(train_indices)
-subset_validation = validation_ds.select(validation_indices)
+try:
+    ds = load_dataset("food101", split=['train', 'validation'])
+    train_ds = ds[0]
+    validation_ds = ds[1]
+    num_classes = train_ds.features['label'].num_classes
+    
+    logging.info(f"Training set size: {len(train_ds)}")
+    logging.info(f"Validation set size: {len(validation_ds)}")
+    
+    # Adjust sample sizes based on actual dataset size
+    N_TRAIN_SAMPLES = min(80000, len(train_ds))
+    N_VALIDATION_SAMPLES = min(20000, len(validation_ds))
+    
+    logging.info(f"Using {N_TRAIN_SAMPLES} training samples and {N_VALIDATION_SAMPLES} validation samples")
+    
+    # Randomly select train and validation samples
+    train_indices = random.sample(range(len(train_ds)), N_TRAIN_SAMPLES)
+    validation_indices = random.sample(range(len(validation_ds)), N_VALIDATION_SAMPLES)
+    
+    subset_train = train_ds.select(train_indices)
+    subset_validation = validation_ds.select(validation_indices)
+except Exception as e:
+    logging.error(f"Error loading dataset: {str(e)}")
+    raise
 
 # Function to preprocess the image data
 def preprocess_image(example):
