@@ -124,7 +124,7 @@ model.summary()
 
 # Callbacks
 model_checkpoint = ModelCheckpoint(
-    'food_classification_best_model.h5', save_best_only=True, monitor='val_loss', verbose=1
+    'food_classification_best_model.h5.keras', save_best_only=True, monitor='val_loss', verbose=1
 )
 early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=1e-6)
