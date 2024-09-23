@@ -122,19 +122,13 @@ model_checkpoint = ModelCheckpoint(
 early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=1e-6)
 
-# Determine number of steps per epoch
-steps_per_epoch = N_TRAIN_SAMPLES // BATCH_SIZE
-validation_steps = N_VALIDATION_SAMPLES // BATCH_SIZE
-
-# Training the model with defined steps
+# Training the model with minimal disk usage
 try:
     logging.info("Training the model...")
     history = model.fit(
         train_tf_dataset,
         validation_data=validation_tf_dataset,
         epochs=EPOCHS,
-        steps_per_epoch=steps_per_epoch,
-        validation_steps=validation_steps,
         callbacks=[early_stopping, reduce_lr, model_checkpoint]
     )
 
