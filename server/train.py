@@ -12,7 +12,7 @@ import random
 import os
 
 # Suppress TensorFlow warnings
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 # Enable mixed precision
 policy = mixed_precision.Policy('mixed_float16')
@@ -73,7 +73,7 @@ except Exception as e:
 
 # Function to preprocess the image data
 def preprocess_image(example):
-    image = example['image'].resize(IMG_SIZE)
+    image = example['image'].resize(IMG_SIZE).convert('RGB')  # Ensure the image has 3 channels (RGB)
     image = np.array(image, dtype=np.float32)
     image = preprocess_input(image)
     label = tf.one_hot(example['label'], depth=num_classes)
