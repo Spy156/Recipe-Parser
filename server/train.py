@@ -115,7 +115,7 @@ model = create_food_classification_model((*IMG_SIZE, 3), num_classes)
 
 # Callbacks: Save only the best model and reduce unnecessary checkpoints
 model_checkpoint = ModelCheckpoint(
-    'food_classification_best_model.h5', save_best_only=True, monitor='val_loss', verbose=1
+    'food_classification_best_model.h5.keras', save_best_only=True, monitor='val_loss', verbose=1
 )
 
 # Callbacks for early stopping and learning rate reduction
