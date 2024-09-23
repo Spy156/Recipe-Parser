@@ -19,7 +19,7 @@ np.random.seed(42)
 
 # Image and model configuration
 IMG_SIZE = (224, 224)
-BATCH_SIZE = 128  # Increased batch size for faster processing
+BATCH_SIZE = 1024  # Increased batch size for faster processing
 EPOCHS = 20  # Increased epochs for better learning with larger dataset
 N_TRAIN_SAMPLES = 20000  # Increased to 20,000 training samples
 N_VALIDATION_SAMPLES = 10000  # Increased to 10,000 validation samples
