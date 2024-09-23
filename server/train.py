@@ -13,7 +13,8 @@ import os
 
 # Suppress TensorFlow warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-
+os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 # Enable mixed precision
 policy = mixed_precision.Policy('mixed_float16')
 mixed_precision.set_global_policy(policy)
@@ -129,6 +130,9 @@ model_checkpoint = ModelCheckpoint(
 early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=1e-6)
 
+steps_per_epoch = N_TRAIN_SAMPLES // BATCH_SIZE
+validation_steps = N_VALIDATION_SAMPLES // BATCH_SIZE
+
 # Training the model
 try:
     logging.info("Training the model...")
@@ -137,6 +141,8 @@ try:
             train_tf_dataset,
             validation_data=validation_tf_dataset,
             epochs=EPOCHS,
+            steps_per_epoch=steps_per_epoch,  # Explicitly set the number of steps per epoch
+            validation_steps=validation_steps,
             callbacks=[early_stopping, reduce_lr, model_checkpoint]
         )
 
