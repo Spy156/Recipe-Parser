@@ -11,6 +11,9 @@ import matplotlib.pyplot as plt
 import random
 import os
 
+
+logging.getLogger('tensorflow').setLevel(logging.ERROR)
+
 # Suppress TensorFlow warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
