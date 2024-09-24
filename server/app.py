@@ -4,7 +4,6 @@ from flask_cors import CORS
 from recipe_parser import RecipeParser
 import tensorflow as tf
 from tensorflow.keras.applications import MobileNetV2
-from tensorflow.keras.layers import Cast
 from tensorflow.keras.preprocessing.image import img_to_array
 import numpy as np
 import os
@@ -21,8 +20,7 @@ recipe_parser = RecipeParser()
 
 # Load the model
 try:
-    with tf.keras.utils.custom_object_scope({'Cast': Cast, 'MobileNetV2': MobileNetV2}):
-        food_model = tf.keras.models.load_model('food_classification_model.h5')
+    food_model = tf.keras.models.load_model('food_classification_model.h5', custom_objects={'MobileNetV2': MobileNetV2})
     logging.info("Model loaded successfully")
 except Exception as e:
     logging.error(f"Error loading model: {str(e)}")
@@ -70,7 +68,7 @@ def analyze_image():
         # Convert to array and preprocess
         img_array = img_to_array(img)
         img_array = np.expand_dims(img_array, axis=0)
-        img_array /= 255.0
+        img_array = img_array.astype('float32') / 255.0
         
         logging.info("Making prediction")
         predictions = food_model.predict(img_array)
