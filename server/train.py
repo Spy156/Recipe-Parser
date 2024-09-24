@@ -11,13 +11,9 @@ import matplotlib.pyplot as plt
 import random
 import os
 
-
-logging.getLogger('tensorflow').setLevel(logging.ERROR)
-
 # Suppress TensorFlow warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 # Enable mixed precision
 policy = mixed_precision.Policy('mixed_float16')
 mixed_precision.set_global_policy(policy)
@@ -33,7 +29,7 @@ np.random.seed(42)
 # Image and model configuration
 IMG_SIZE = (224, 224)
 BATCH_SIZE = 512
-EPOCHS = 20
+EPOCHS = 50  # Set the number of epochs to 50
 
 # Check TensorFlow GPU support
 logging.info(f"TensorFlow version: {tf.__version__}")
@@ -59,18 +55,15 @@ try:
     logging.info(f"Training set size: {len(train_ds)}")
     logging.info(f"Validation set size: {len(validation_ds)}")
     
-    # Adjust sample sizes based on actual dataset size
-    N_TRAIN_SAMPLES = min(80000, len(train_ds))
-    N_VALIDATION_SAMPLES = min(20000, len(validation_ds))
+    # Use the entire training and validation datasets
+    N_TRAIN_SAMPLES = len(train_ds)
+    N_VALIDATION_SAMPLES = len(validation_ds)
     
     logging.info(f"Using {N_TRAIN_SAMPLES} training samples and {N_VALIDATION_SAMPLES} validation samples")
     
-    # Randomly select train and validation samples
-    train_indices = random.sample(range(len(train_ds)), N_TRAIN_SAMPLES)
-    validation_indices = random.sample(range(len(validation_ds)), N_VALIDATION_SAMPLES)
-    
-    subset_train = train_ds.select(train_indices)
-    subset_validation = validation_ds.select(validation_indices)
+    # No need to randomly select train and validation samples
+    subset_train = train_ds  # Use the entire training dataset
+    subset_validation = validation_ds  # Use the entire validation dataset
 except Exception as e:
     logging.error(f"Error loading dataset: {str(e)}")
     raise
