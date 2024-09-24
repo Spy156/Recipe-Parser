@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 import random
 import os
 
+logging.getLogger('tensorflow').setLevel(logging.ERROR)
+
 # Suppress TensorFlow warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
@@ -28,8 +30,8 @@ np.random.seed(42)
 
 # Image and model configuration
 IMG_SIZE = (224, 224)
-BATCH_SIZE = 512
-EPOCHS = 50  # Set the number of epochs to 50
+BATCH_SIZE = 32  # Adjust batch size to avoid out-of-memory errors
+EPOCHS = 50
 
 # Check TensorFlow GPU support
 logging.info(f"TensorFlow version: {tf.__version__}")
@@ -54,16 +56,13 @@ try:
     
     logging.info(f"Training set size: {len(train_ds)}")
     logging.info(f"Validation set size: {len(validation_ds)}")
-    
-    # Use the entire training and validation datasets
+
+    # Use entire dataset
     N_TRAIN_SAMPLES = len(train_ds)
     N_VALIDATION_SAMPLES = len(validation_ds)
     
     logging.info(f"Using {N_TRAIN_SAMPLES} training samples and {N_VALIDATION_SAMPLES} validation samples")
     
-    # No need to randomly select train and validation samples
-    subset_train = train_ds  # Use the entire training dataset
-    subset_validation = validation_ds  # Use the entire validation dataset
 except Exception as e:
     logging.error(f"Error loading dataset: {str(e)}")
     raise
@@ -80,15 +79,13 @@ def preprocess_image(example):
 def to_tf_dataset(dataset):
     return tf.data.Dataset.from_generator(
         lambda: map(preprocess_image, dataset),
-        output_signature=(
-            tf.TensorSpec(shape=(IMG_SIZE[0], IMG_SIZE[1], 3), dtype=tf.float32),
-            tf.TensorSpec(shape=(num_classes,), dtype=tf.float32)
-        )
+        output_signature=(tf.TensorSpec(shape=(IMG_SIZE[0], IMG_SIZE[1], 3), dtype=tf.float32),
+                          tf.TensorSpec(shape=(num_classes,), dtype=tf.float32))
     ).batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
 
 # Convert train and validation datasets
-train_tf_dataset = to_tf_dataset(subset_train)
-validation_tf_dataset = to_tf_dataset(subset_validation)
+train_tf_dataset = to_tf_dataset(train_ds)
+validation_tf_dataset = to_tf_dataset(validation_ds)
 
 # Create the model
 def create_food_classification_model(input_shape, num_classes):
@@ -114,14 +111,14 @@ def create_food_classification_model(input_shape, num_classes):
     return model
 
 # Create and compile the model
-with tf.device('/GPU:0'):
+with tf.device('/GPU:0' if physical_devices else '/CPU:0'):
     model = create_food_classification_model((*IMG_SIZE, 3), num_classes)
 
 model.summary()
 
 # Callbacks
 model_checkpoint = ModelCheckpoint(
-    'food_classification_best_model.h5.keras', save_best_only=True, monitor='val_loss', verbose=1
+    'food_classification_best_model.keras', save_best_only=True, monitor='val_loss', verbose=1
 )
 early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=1e-6)
@@ -132,15 +129,17 @@ validation_steps = N_VALIDATION_SAMPLES // BATCH_SIZE
 # Training the model
 try:
     logging.info("Training the model...")
-    with tf.device('/GPU:0'):
+    for epoch in range(EPOCHS):
+        logging.info(f"Starting epoch {epoch + 1}/{EPOCHS}")
         history = model.fit(
             train_tf_dataset,
             validation_data=validation_tf_dataset,
-            epochs=EPOCHS,
-            steps_per_epoch=steps_per_epoch,  # Explicitly set the number of steps per epoch
+            epochs=1,  # Train one epoch at a time for better logging
+            steps_per_epoch=steps_per_epoch,
             validation_steps=validation_steps,
             callbacks=[early_stopping, reduce_lr, model_checkpoint]
         )
+        logging.info(f"Epoch {epoch + 1} completed. Training Accuracy: {history.history['accuracy'][-1]:.4f}, Validation Accuracy: {history.history['val_accuracy'][-1]:.4f}")
 
     # Save class names
     class_names = train_ds.features['label'].names
@@ -180,5 +179,5 @@ except Exception as e:
     logging.error(f"An error occurred during training: {str(e)}")
 
 # Save the final model
-model.save('food_classification_final_model.h5')
-logging.info("Final model saved as 'food_classification_final_model.h5'")
+model.save('food_classification_final_model.keras')
+logging.info("Final model saved as 'food_classification_final_model.keras'")
