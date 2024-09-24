@@ -1,98 +1,73 @@
 import pandas as pd
+import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from joblib import dump, load
 import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class RecipeParser:
     def __init__(self):
-        self.vectorizer = TfidfVectorizer()
-        self.recipes_df = None
+        self.vectorizer = TfidfVectorizer(stop_words='english')
         self.tfidf_matrix = None
+        self.recipes_df = None
 
     def train_from_csv(self, csv_file):
-        logging.info(f"Training model from CSV file: {csv_file}")
         try:
-            # Load the CSV file
+            logging.info(f"Loading data from CSV file: {csv_file}")
             self.recipes_df = pd.read_csv(csv_file)
-
-            # Clean the 'name' column
-            self.recipes_df['name'] = self.recipes_df['name'].fillna('Unknown Recipe')
-            self.recipes_df['name'] = self.recipes_df['name'].astype(str)
-
-            # Remove any rows with empty names after cleaning
-            self.recipes_df = self.recipes_df[self.recipes_df['name'] != '']
-
+            
+            # Check for NaN values in the 'name' column
+            nan_count = self.recipes_df['name'].isna().sum()
+            if nan_count > 0:
+                logging.warning(f"Found {nan_count} NaN values in 'name' column. Removing these rows.")
+                self.recipes_df = self.recipes_df.dropna(subset=['name'])
+            
+            logging.info(f"Loaded {len(self.recipes_df)} recipes")
+            
             # Fit and transform the TF-IDF vectorizer
             self.tfidf_matrix = self.vectorizer.fit_transform(self.recipes_df['name'])
+            logging.info("TF-IDF matrix created successfully")
             
-            logging.info(f"Model trained successfully. Processed {len(self.recipes_df)} recipes.")
+        except FileNotFoundError:
+            logging.error(f"CSV file not found: {csv_file}")
+            raise
+        except pd.errors.EmptyDataError:
+            logging.error(f"CSV file is empty: {csv_file}")
+            raise
+        except ValueError as e:
+            logging.error(f"Error processing CSV data: {str(e)}")
+            raise
         except Exception as e:
-            logging.error(f"Error training model: {str(e)}")
+            logging.error(f"Unexpected error: {str(e)}")
             raise
 
-    def predict(self, recipe_name, num_ingredients=4):
+    def find_similar_recipes(self, query, n=5):
         if self.tfidf_matrix is None:
-            logging.error("Model not trained. Please train the model first.")
-            return None
+            raise ValueError("Model not trained. Call train_from_csv() first.")
+        
+        query_vec = self.vectorizer.transform([query])
+        cosine_similarities = cosine_similarity(query_vec, self.tfidf_matrix).flatten()
+        related_docs_indices = cosine_similarities.argsort()[:-n-1:-1]
+        
+        return self.recipes_df.iloc[related_docs_indices]
 
-        try:
-            # Transform the input recipe name
-            recipe_vec = self.vectorizer.transform([recipe_name])
+def main():
+    recipe_parser = RecipeParser()
+    
+    try:
+        recipe_parser.train_from_csv('RAW_recipes.csv')
+        logging.info("Model trained successfully")
+        
+        # Example usage
+        query = "chicken soup"
+        similar_recipes = recipe_parser.find_similar_recipes(query)
+        print(f"Recipes similar to '{query}':")
+        print(similar_recipes[['name', 'ingredients']])
+        
+    except Exception as e:
+        logging.error(f"An error occurred: {str(e)}")
 
-            # Calculate cosine similarity
-            cosine_similarities = cosine_similarity(recipe_vec, self.tfidf_matrix).flatten()
-
-            # Get the index of the most similar recipe
-            similar_recipe_idx = cosine_similarities.argmax()
-
-            # Get the similar recipe details
-            similar_recipe = self.recipes_df.iloc[similar_recipe_idx]
-
-            # Extract ingredients (assuming 'ingredients' column exists)
-            if 'ingredients' in similar_recipe:
-                ingredients = eval(similar_recipe['ingredients'])[:num_ingredients]
-            else:
-                ingredients = []
-
-            # Extract instructions (assuming 'instructions' column exists)
-            if 'instructions' in similar_recipe:
-                instructions = eval(similar_recipe['instructions'])
-            else:
-                instructions = []
-
-            return {
-                "name": similar_recipe['name'],
-                "ingredients": ingredients,
-                "instructions": instructions,
-                "servings": similar_recipe.get('servings', 4)  # Default to 4 if 'servings' column doesn't exist
-            }
-        except Exception as e:
-            logging.error(f"Error predicting recipe: {str(e)}")
-            return None
-
-    def save_model(self, filename='recipe_model.joblib'):
-        if self.tfidf_matrix is None:
-            logging.error("Model not trained. Cannot save.")
-            return
-
-        try:
-            dump({
-                'vectorizer': self.vectorizer,
-                'tfidf_matrix': self.tfidf_matrix,
-                'recipes_df': self.recipes_df
-            }, filename)
-            logging.info(f"Model saved successfully to {filename}")
-        except Exception as e:
-            logging.error(f"Error saving model: {str(e)}")
-
-    def load_model(self, filename='recipe_model.joblib'):
-        try:
-            loaded_model = load(filename)
-            self.vectorizer = loaded_model['vectorizer']
-            self.tfidf_matrix = loaded_model['tfidf_matrix']
-            self.recipes_df = loaded_model['recipes_df']
-            logging.info(f"Model loaded successfully from {filename}")
-        except Exception as e:
-            logging.error(f"Error loading model: {str(e)}")
-            raise
+if __name__ == "__main__":
+    main()
