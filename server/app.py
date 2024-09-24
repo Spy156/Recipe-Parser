@@ -1,14 +1,15 @@
+import logging
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from recipe_parser import RecipeParser
 import tensorflow as tf
 from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.layers import Cast
 from tensorflow.keras.preprocessing.image import img_to_array
 import numpy as np
 import os
 from PIL import Image
 import io
-import logging
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -18,13 +19,16 @@ CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}})
 
 recipe_parser = RecipeParser()
 
+# Load the model
 try:
-    food_model = tf.keras.models.load_model('food_classification_model.h5', custom_objects={'MobileNetV2': MobileNetV2})
+    with tf.keras.utils.custom_object_scope({'Cast': Cast, 'MobileNetV2': MobileNetV2}):
+        food_model = tf.keras.models.load_model('food_classification_model.h5')
     logging.info("Model loaded successfully")
 except Exception as e:
     logging.error(f"Error loading model: {str(e)}")
     raise
 
+# Load class names
 try:
     with open('class_names.txt', 'r') as f:
         class_names = [line.strip() for line in f]
@@ -33,6 +37,7 @@ except Exception as e:
     logging.error(f"Error loading class names: {str(e)}")
     raise
 
+# Load or train recipe model
 if os.path.exists('recipe_model.joblib'):
     recipe_parser.load_model()
     logging.info("Recipe model loaded successfully")
