@@ -1,5 +1,5 @@
 import tensorflow as tf
-from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input, MobileNetV2
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 from tensorflow.keras import mixed_precision
 from tensorflow.keras.optimizers import Adam
@@ -11,11 +11,10 @@ import matplotlib.pyplot as plt
 import random
 import os
 
-logging.getLogger('tensorflow').setLevel(logging.ERROR)
-
 # Suppress TensorFlow warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
+
 # Enable mixed precision
 policy = mixed_precision.Policy('mixed_float16')
 mixed_precision.set_global_policy(policy)
@@ -30,7 +29,7 @@ np.random.seed(42)
 
 # Image and model configuration
 IMG_SIZE = (224, 224)
-BATCH_SIZE = 32  # Adjust batch size to avoid out-of-memory errors
+BATCH_SIZE = 32  # Reduced batch size
 EPOCHS = 50
 
 # Check TensorFlow GPU support
@@ -56,20 +55,13 @@ try:
     
     logging.info(f"Training set size: {len(train_ds)}")
     logging.info(f"Validation set size: {len(validation_ds)}")
-
-    # Use entire dataset
-    N_TRAIN_SAMPLES = len(train_ds)
-    N_VALIDATION_SAMPLES = len(validation_ds)
-    
-    logging.info(f"Using {N_TRAIN_SAMPLES} training samples and {N_VALIDATION_SAMPLES} validation samples")
-    
 except Exception as e:
     logging.error(f"Error loading dataset: {str(e)}")
     raise
 
 # Function to preprocess the image data
 def preprocess_image(example):
-    image = example['image'].resize(IMG_SIZE).convert('RGB')  # Ensure the image has 3 channels (RGB)
+    image = example['image'].resize(IMG_SIZE)
     image = np.array(image, dtype=np.float32)
     image = preprocess_input(image)
     label = tf.one_hot(example['label'], depth=num_classes)
@@ -79,9 +71,11 @@ def preprocess_image(example):
 def to_tf_dataset(dataset):
     return tf.data.Dataset.from_generator(
         lambda: map(preprocess_image, dataset),
-        output_signature=(tf.TensorSpec(shape=(IMG_SIZE[0], IMG_SIZE[1], 3), dtype=tf.float32),
-                          tf.TensorSpec(shape=(num_classes,), dtype=tf.float32))
-    ).batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+        output_signature=(
+            tf.TensorSpec(shape=(IMG_SIZE[0], IMG_SIZE[1], 3), dtype=tf.float32),
+            tf.TensorSpec(shape=(num_classes,), dtype=tf.float32)
+        )
+    ).shuffle(1000).batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE).repeat()
 
 # Convert train and validation datasets
 train_tf_dataset = to_tf_dataset(train_ds)
@@ -89,29 +83,28 @@ validation_tf_dataset = to_tf_dataset(validation_ds)
 
 # Create the model
 def create_food_classification_model(input_shape, num_classes):
-    base_model = tf.keras.applications.MobileNetV2(weights='imagenet', include_top=False, input_shape=input_shape)
+    base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=input_shape)
     
-    # Unfreeze some layers
     base_model.trainable = True
-    for layer in base_model.layers[:-10]:  # Freeze all but the last 10 layers
+    for layer in base_model.layers[:-10]:
         layer.trainable = False
     
     x = base_model.output
     x = tf.keras.layers.GlobalAveragePooling2D()(x)
-    x = tf.keras.layers.Dense(2048, activation='relu')(x)
-    x = tf.keras.layers.Dense(1024, activation='relu')(x)
+    x = tf.keras.layers.Dense(1024, activation='relu', kernel_initializer='he_normal')(x)
+    x = tf.keras.layers.Dropout(0.5)(x)
     predictions = tf.keras.layers.Dense(num_classes, activation='softmax')(x)
     
     model = tf.keras.Model(inputs=base_model.input, outputs=predictions)
     
-    optimizer = Adam(learning_rate=0.001)
+    optimizer = Adam(learning_rate=0.0001, clipnorm=1.0)  # Lower learning rate and gradient clipping
     model.compile(optimizer=optimizer,
                   loss='categorical_crossentropy', 
                   metrics=['accuracy'])
     return model
 
 # Create and compile the model
-with tf.device('/GPU:0' if physical_devices else '/CPU:0'):
+with tf.device('/GPU:0'):
     model = create_food_classification_model((*IMG_SIZE, 3), num_classes)
 
 model.summary()
@@ -120,26 +113,34 @@ model.summary()
 model_checkpoint = ModelCheckpoint(
     'food_classification_best_model.keras', save_best_only=True, monitor='val_loss', verbose=1
 )
-early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=1e-6)
+early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
 
-steps_per_epoch = N_TRAIN_SAMPLES // BATCH_SIZE
-validation_steps = N_VALIDATION_SAMPLES // BATCH_SIZE
+class MonitorCallback(tf.keras.callbacks.Callback):
+    def on_epoch_begin(self, epoch, logs=None):
+        logging.info(f"Starting epoch {epoch + 1}")
+    
+    def on_epoch_end(self, epoch, logs=None):
+        logging.info(f"Epoch {epoch + 1}/{EPOCHS}")
+        for k, v in logs.items():
+            logging.info(f"{k}: {v:.4f}")
+
+# Calculate steps
+steps_per_epoch = len(train_ds) // BATCH_SIZE
+validation_steps = len(validation_ds) // BATCH_SIZE
 
 # Training the model
 try:
     logging.info("Training the model...")
-    for epoch in range(EPOCHS):
-        logging.info(f"Starting epoch {epoch + 1}/{EPOCHS}")
+    with tf.device('/GPU:0'):
         history = model.fit(
             train_tf_dataset,
             validation_data=validation_tf_dataset,
-            epochs=1,  # Train one epoch at a time for better logging
+            epochs=EPOCHS,
             steps_per_epoch=steps_per_epoch,
             validation_steps=validation_steps,
-            callbacks=[early_stopping, reduce_lr, model_checkpoint]
+            callbacks=[early_stopping, reduce_lr, model_checkpoint, MonitorCallback()]
         )
-        logging.info(f"Epoch {epoch + 1} completed. Training Accuracy: {history.history['accuracy'][-1]:.4f}, Validation Accuracy: {history.history['val_accuracy'][-1]:.4f}")
 
     # Save class names
     class_names = train_ds.features['label'].names
@@ -171,12 +172,13 @@ try:
     logging.info("Training history plot saved as 'training_history.png'")
 
     # Evaluate the model
-    evaluation = model.evaluate(validation_tf_dataset)
+    evaluation = model.evaluate(validation_tf_dataset, steps=validation_steps)
     logging.info(f"Validation Loss: {evaluation[0]:.4f}")
     logging.info(f"Validation Accuracy: {evaluation[1]:.4f}")
 
 except Exception as e:
     logging.error(f"An error occurred during training: {str(e)}")
+    raise
 
 # Save the final model
 model.save('food_classification_final_model.keras')
