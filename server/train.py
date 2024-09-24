@@ -29,7 +29,7 @@ np.random.seed(42)
 
 # Image and model configuration
 IMG_SIZE = (224, 224)
-BATCH_SIZE = 32  # Reduced batch size
+BATCH_SIZE = 32
 EPOCHS = 50
 
 # Check TensorFlow GPU support
@@ -62,6 +62,9 @@ except Exception as e:
 # Function to preprocess the image data
 def preprocess_image(example):
     image = example['image'].resize(IMG_SIZE)
+    # Convert grayscale to RGB if necessary
+    if image.mode != 'RGB':
+        image = image.convert('RGB')
     image = np.array(image, dtype=np.float32)
     image = preprocess_input(image)
     label = tf.one_hot(example['label'], depth=num_classes)
@@ -75,11 +78,20 @@ def to_tf_dataset(dataset):
             tf.TensorSpec(shape=(IMG_SIZE[0], IMG_SIZE[1], 3), dtype=tf.float32),
             tf.TensorSpec(shape=(num_classes,), dtype=tf.float32)
         )
-    ).shuffle(1000).batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE).repeat()
+    ).shuffle(1000).batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
 
 # Convert train and validation datasets
 train_tf_dataset = to_tf_dataset(train_ds)
 validation_tf_dataset = to_tf_dataset(validation_ds)
+
+# Inspect a few samples from the dataset
+for images, labels in train_tf_dataset.take(1):
+    for i in range(3):
+        plt.figure(figsize=(5,5))
+        plt.imshow(images[i] / 2 + 0.5)  # De-normalize the image
+        plt.title(f"Shape: {images[i].shape}")
+        plt.axis('off')
+        plt.show()
 
 # Create the model
 def create_food_classification_model(input_shape, num_classes):
@@ -125,10 +137,6 @@ class MonitorCallback(tf.keras.callbacks.Callback):
         for k, v in logs.items():
             logging.info(f"{k}: {v:.4f}")
 
-# Calculate steps
-steps_per_epoch = len(train_ds) // BATCH_SIZE
-validation_steps = len(validation_ds) // BATCH_SIZE
-
 # Training the model
 try:
     logging.info("Training the model...")
@@ -137,8 +145,6 @@ try:
             train_tf_dataset,
             validation_data=validation_tf_dataset,
             epochs=EPOCHS,
-            steps_per_epoch=steps_per_epoch,
-            validation_steps=validation_steps,
             callbacks=[early_stopping, reduce_lr, model_checkpoint, MonitorCallback()]
         )
 
@@ -172,10 +178,14 @@ try:
     logging.info("Training history plot saved as 'training_history.png'")
 
     # Evaluate the model
-    evaluation = model.evaluate(validation_tf_dataset, steps=validation_steps)
+    evaluation = model.evaluate(validation_tf_dataset)
     logging.info(f"Validation Loss: {evaluation[0]:.4f}")
     logging.info(f"Validation Accuracy: {evaluation[1]:.4f}")
 
+except tf.errors.InvalidArgumentError as e:
+    logging.error(f"InvalidArgumentError occurred: {str(e)}")
+    logging.error("This might be due to inconsistent image shapes in the dataset.")
+    # You might want to add additional error handling or data inspection here
 except Exception as e:
     logging.error(f"An error occurred during training: {str(e)}")
     raise
