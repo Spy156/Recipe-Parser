@@ -16,7 +16,7 @@ def download_raw_recipes(target_filename: str = 'RAW_recipes.csv', folder_id: Op
     folder_id (str, optional): The Google Drive folder ID. If None, uses a default ID.
     """
     if folder_id is None:
-        folder_id = '17FkgU6C6IKkibt1_2R2mX_XShHzfji9-?q=sharedwith:public%20parent:17FkgU6C6IKkibt1_2R2mX_XShHzfji9-'
+        folder_id = '1b4JUwJtxJ7QwSs1_vXIO8OTgen0pwZ-C'
     
     if os.path.exists(target_filename):
         logging.info(f"{target_filename} already exists in the project directory.")
