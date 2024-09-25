@@ -20,7 +20,6 @@ os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
 policy = mixed_precision.Policy('mixed_float16')
 mixed_precision.set_global_policy(policy)
 
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Set random seed for reproducibility
@@ -63,7 +62,6 @@ except Exception as e:
 # Function to preprocess the image data
 def preprocess_image(example):
     image = example['image'].resize(IMG_SIZE)
-    # Convert grayscale to RGB if necessary
     if image.mode != 'RGB':
         image = image.convert('RGB')
     image = np.array(image, dtype=np.float32)
@@ -75,10 +73,8 @@ def preprocess_image(example):
 def to_tf_dataset(dataset):
     return tf.data.Dataset.from_generator(
         lambda: map(preprocess_image, dataset),
-        output_signature=(
-            tf.TensorSpec(shape=(IMG_SIZE[0], IMG_SIZE[1], 3), dtype=tf.float32),
-            tf.TensorSpec(shape=(num_classes,), dtype=tf.float32)
-        )
+        output_signature=(tf.TensorSpec(shape=(IMG_SIZE[0], IMG_SIZE[1], 3), dtype=tf.float32),
+                          tf.TensorSpec(shape=(num_classes,), dtype=tf.float32))
     ).shuffle(1000).batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
 
 # Convert train and validation datasets
@@ -141,45 +137,27 @@ def lr_schedule(epoch):
 lr_scheduler = tf.keras.callbacks.LearningRateScheduler(lr_schedule)
 
 class DetailedLoggingCallback(tf.keras.callbacks.Callback):
-    def __init__(self, num_epochs, steps_per_epoch):
+    def __init__(self, num_epochs):
         super().__init__()
         self.num_epochs = num_epochs
-        self.steps_per_epoch = steps_per_epoch
         self.start_time = None
-        self.epoch_start_time = None
 
     def on_train_begin(self, logs=None):
         self.start_time = time.time()
         logging.info(f"Starting training for {self.num_epochs} epochs")
-        logging.info(f"Steps per epoch: {self.steps_per_epoch}")
 
     def on_epoch_begin(self, epoch, logs=None):
-        self.epoch_start_time = time.time()
         logging.info(f"Starting epoch {epoch + 1}/{self.num_epochs}")
 
-    def on_train_batch_end(self, batch, logs=None):
-        if batch % 10 == 0:  # Log every 10 batches
-            # Check if history is populated before accessing it
-            current_epoch = self.model.history.epoch[-1] + 1 if self.model.history.epoch else 1
-            elapsed_time = time.time() - self.epoch_start_time
-            estimated_time = (self.steps_per_epoch - batch) * (elapsed_time / (batch + 1))
-            logging.info(f"Epoch {current_epoch}, "
-                         f"Batch {batch + 1}/{self.steps_per_epoch}, "
-                         f"Loss: {logs['loss']:.4f}, Accuracy: {logs['accuracy']:.4f}, "
-                         f"Estimated time remaining: {estimated_time:.2f} seconds")
-
     def on_epoch_end(self, epoch, logs=None):
-        epoch_time = time.time() - self.epoch_start_time
-        total_time = time.time() - self.start_time
+        epoch_time = time.time() - self.start_time
         logging.info(f"Epoch {epoch + 1}/{self.num_epochs} completed in {epoch_time:.2f} seconds")
-        logging.info(f"Total training time so far: {total_time:.2f} seconds")
         logging.info(f"Epoch {epoch + 1} - Loss: {logs['loss']:.4f}, Accuracy: {logs['accuracy']:.4f}, "
                      f"Val Loss: {logs['val_loss']:.4f}, Val Accuracy: {logs['val_accuracy']:.4f}")
 
     def on_train_end(self, logs=None):
         total_time = time.time() - self.start_time
         logging.info(f"Training completed in {total_time:.2f} seconds")
-
 
 # Calculate steps per epoch
 steps_per_epoch = len(train_ds) // BATCH_SIZE
@@ -196,7 +174,7 @@ try:
                 early_stopping,
                 reduce_lr,
                 model_checkpoint,
-                DetailedLoggingCallback(EPOCHS, steps_per_epoch),
+                DetailedLoggingCallback(EPOCHS),
                 lr_scheduler
             ]
         )
@@ -253,55 +231,4 @@ logging.info("Starting fine-tuning...")
 base_model = model.layers[1]
 base_model.trainable = True
 for layer in base_model.layers[-30:]:
-    layer.trainable = True
-
-# Recompile the model
-model.compile(
-    optimizer=Adam(learning_rate=0.0001),
-    loss='categorical_crossentropy',
-    metrics=['accuracy']
-)
-
-# Train the model again (fine-tuning)
-history_fine = model.fit(
-    train_tf_dataset,
-    epochs=10,
-    validation_data=validation_tf_dataset,
-    callbacks=[
-        early_stopping,
-        reduce_lr,
-        model_checkpoint,
-        DetailedLoggingCallback(10, steps_per_epoch)
-    ]
-)
-
-# Evaluate the fine-tuned model
-evaluation = model.evaluate(validation_tf_dataset)
-logging.info(f"Final Validation Loss: {evaluation[0]:.4f}")
-logging.info(f"Final Validation Accuracy: {evaluation[1]:.4f}")
-
-# Save the final fine-tuned model
-model.save('food_classification_final_finetuned_model.keras')
-logging.info("Final fine-tuned model saved as 'food_classification_final_finetuned_model.keras'")
-
-# Plot fine-tuning history
-plt.figure(figsize=(12, 4))
-plt.subplot(1, 2, 1)
-plt.plot(history_fine.history['accuracy'], label='Training Accuracy')
-plt.plot(history_fine.history['val_accuracy'], label='Validation Accuracy')
-plt.title('Fine-tuning Model Accuracy')
-plt.xlabel('Epoch')
-plt.ylabel('Accuracy')
-plt.legend()
-
-plt.subplot(1, 2, 2)
-plt.plot(history_fine.history['loss'], label='Training Loss')
-plt.plot(history_fine.history['val_loss'], label='Validation Loss')
-plt.title('Fine-tuning Model Loss')
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
-plt.legend()
-
-plt.tight_layout()
-plt.savefig('finetuning_history.png')
-logging.info("Fine-tuning history plot saved as 'finetuning_history.png'")
+    layer.trainable
