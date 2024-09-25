@@ -20,7 +20,7 @@ os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
 policy = mixed_precision.Policy('mixed_float16')
 mixed_precision.set_global_policy(policy)
 
-# Setup logging
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Set random seed for reproducibility
