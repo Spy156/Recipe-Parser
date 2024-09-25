@@ -7,3 +7,4 @@ pillow
 joblib
 matplotlib
 datasets
+gdown
