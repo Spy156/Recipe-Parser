@@ -159,9 +159,11 @@ class DetailedLoggingCallback(tf.keras.callbacks.Callback):
 
     def on_train_batch_end(self, batch, logs=None):
         if batch % 10 == 0:  # Log every 10 batches
+            # Check if history is populated before accessing it
+            current_epoch = self.model.history.epoch[-1] + 1 if self.model.history.epoch else 1
             elapsed_time = time.time() - self.epoch_start_time
             estimated_time = (self.steps_per_epoch - batch) * (elapsed_time / (batch + 1))
-            logging.info(f"Epoch {self.model.history.epoch[-1] + 1}, "
+            logging.info(f"Epoch {current_epoch}, "
                          f"Batch {batch + 1}/{self.steps_per_epoch}, "
                          f"Loss: {logs['loss']:.4f}, Accuracy: {logs['accuracy']:.4f}, "
                          f"Estimated time remaining: {estimated_time:.2f} seconds")
@@ -177,6 +179,7 @@ class DetailedLoggingCallback(tf.keras.callbacks.Callback):
     def on_train_end(self, logs=None):
         total_time = time.time() - self.start_time
         logging.info(f"Training completed in {total_time:.2f} seconds")
+
 
 # Calculate steps per epoch
 steps_per_epoch = len(train_ds) // BATCH_SIZE
