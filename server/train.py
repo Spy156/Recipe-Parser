@@ -231,4 +231,35 @@ logging.info("Starting fine-tuning...")
 base_model = model.layers[1]
 base_model.trainable = True
 for layer in base_model.layers[-30:]:
-    layer.trainable
+    layer.trainable = True
+
+# Recompile the model
+model.compile(
+    optimizer=Adam(learning_rate=0.0001),
+    loss='categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+# Fine-tune the model
+try:
+    logging.info("Fine-tuning the model...")
+    with tf.device('/GPU:0'):
+        fine_tune_history = model.fit(
+            train_tf_dataset,
+            validation_data=validation_tf_dataset,
+            epochs=EPOCHS,
+            callbacks=[
+                early_stopping,
+                reduce_lr,
+                model_checkpoint,
+                DetailedLoggingCallback(EPOCHS)
+            ]
+        )
+
+    # Save the fine-tuned model
+    model.save('food_classification_fine_tuned_model.keras')
+    logging.info("Fine-tuned model saved as 'food_classification_fine_tuned_model.keras'")
+
+except Exception as e:
+    logging.error(f"An error occurred during fine-tuning: {str(e)}")
+    raise
