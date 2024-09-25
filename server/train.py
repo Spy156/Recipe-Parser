@@ -10,6 +10,7 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import random
 import os
+import time
 
 # Suppress TensorFlow warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -52,7 +53,7 @@ try:
     train_ds = ds[0]
     validation_ds = ds[1]
     num_classes = train_ds.features['label'].num_classes
-    
+
     logging.info(f"Training set size: {len(train_ds)}")
     logging.info(f"Validation set size: {len(validation_ds)}")
 except Exception as e:
@@ -96,22 +97,25 @@ for images, labels in train_tf_dataset.take(1):
 # Create the model
 def create_food_classification_model(input_shape, num_classes):
     base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=input_shape)
-    
-    base_model.trainable = True
-    for layer in base_model.layers[:-10]:
-        layer.trainable = False
-    
+
+    # Freeze the entire base model initially
+    base_model.trainable = False
+
     x = base_model.output
     x = tf.keras.layers.GlobalAveragePooling2D()(x)
-    x = tf.keras.layers.Dense(1024, activation='relu', kernel_initializer='he_normal')(x)
-    x = tf.keras.layers.Dropout(0.5)(x)
+    x = tf.keras.layers.Dense(512, activation='relu', kernel_initializer='he_normal')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Dropout(0.3)(x)
+    x = tf.keras.layers.Dense(256, activation='relu', kernel_initializer='he_normal')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Dropout(0.3)(x)
     predictions = tf.keras.layers.Dense(num_classes, activation='softmax')(x)
-    
+
     model = tf.keras.Model(inputs=base_model.input, outputs=predictions)
-    
-    optimizer = Adam(learning_rate=0.0001, clipnorm=1.0)  # Lower learning rate and gradient clipping
+
+    optimizer = Adam(learning_rate=0.001)  # Increased initial learning rate
     model.compile(optimizer=optimizer,
-                  loss='categorical_crossentropy', 
+                  loss='categorical_crossentropy',
                   metrics=['accuracy'])
     return model
 
@@ -125,17 +129,57 @@ model.summary()
 model_checkpoint = ModelCheckpoint(
     'food_classification_best_model.keras', save_best_only=True, monitor='val_loss', verbose=1
 )
-early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
-reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
+early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=1e-6)
 
-class MonitorCallback(tf.keras.callbacks.Callback):
+def lr_schedule(epoch):
+    if epoch < 10:
+        return 0.001
+    else:
+        return 0.001 * tf.math.exp(0.1 * (10 - epoch))
+
+lr_scheduler = tf.keras.callbacks.LearningRateScheduler(lr_schedule)
+
+class DetailedLoggingCallback(tf.keras.callbacks.Callback):
+    def __init__(self, num_epochs, steps_per_epoch):
+        super().__init__()
+        self.num_epochs = num_epochs
+        self.steps_per_epoch = steps_per_epoch
+        self.start_time = None
+        self.epoch_start_time = None
+
+    def on_train_begin(self, logs=None):
+        self.start_time = time.time()
+        logging.info(f"Starting training for {self.num_epochs} epochs")
+        logging.info(f"Steps per epoch: {self.steps_per_epoch}")
+
     def on_epoch_begin(self, epoch, logs=None):
-        logging.info(f"Starting epoch {epoch + 1}")
-    
+        self.epoch_start_time = time.time()
+        logging.info(f"Starting epoch {epoch + 1}/{self.num_epochs}")
+
+    def on_train_batch_end(self, batch, logs=None):
+        if batch % 10 == 0:  # Log every 10 batches
+            elapsed_time = time.time() - self.epoch_start_time
+            estimated_time = (self.steps_per_epoch - batch) * (elapsed_time / (batch + 1))
+            logging.info(f"Epoch {self.model.history.epoch[-1] + 1}, "
+                         f"Batch {batch + 1}/{self.steps_per_epoch}, "
+                         f"Loss: {logs['loss']:.4f}, Accuracy: {logs['accuracy']:.4f}, "
+                         f"Estimated time remaining: {estimated_time:.2f} seconds")
+
     def on_epoch_end(self, epoch, logs=None):
-        logging.info(f"Epoch {epoch + 1}/{EPOCHS}")
-        for k, v in logs.items():
-            logging.info(f"{k}: {v:.4f}")
+        epoch_time = time.time() - self.epoch_start_time
+        total_time = time.time() - self.start_time
+        logging.info(f"Epoch {epoch + 1}/{self.num_epochs} completed in {epoch_time:.2f} seconds")
+        logging.info(f"Total training time so far: {total_time:.2f} seconds")
+        logging.info(f"Epoch {epoch + 1} - Loss: {logs['loss']:.4f}, Accuracy: {logs['accuracy']:.4f}, "
+                     f"Val Loss: {logs['val_loss']:.4f}, Val Accuracy: {logs['val_accuracy']:.4f}")
+
+    def on_train_end(self, logs=None):
+        total_time = time.time() - self.start_time
+        logging.info(f"Training completed in {total_time:.2f} seconds")
+
+# Calculate steps per epoch
+steps_per_epoch = len(train_ds) // BATCH_SIZE
 
 # Training the model
 try:
@@ -145,7 +189,13 @@ try:
             train_tf_dataset,
             validation_data=validation_tf_dataset,
             epochs=EPOCHS,
-            callbacks=[early_stopping, reduce_lr, model_checkpoint, MonitorCallback()]
+            callbacks=[
+                early_stopping,
+                reduce_lr,
+                model_checkpoint,
+                DetailedLoggingCallback(EPOCHS, steps_per_epoch),
+                lr_scheduler
+            ]
         )
 
     # Save class names
@@ -185,7 +235,6 @@ try:
 except tf.errors.InvalidArgumentError as e:
     logging.error(f"InvalidArgumentError occurred: {str(e)}")
     logging.error("This might be due to inconsistent image shapes in the dataset.")
-    # You might want to add additional error handling or data inspection here
 except Exception as e:
     logging.error(f"An error occurred during training: {str(e)}")
     raise
@@ -193,3 +242,63 @@ except Exception as e:
 # Save the final model
 model.save('food_classification_final_model.keras')
 logging.info("Final model saved as 'food_classification_final_model.keras'")
+
+# Fine-tuning step
+logging.info("Starting fine-tuning...")
+
+# Unfreeze the top layers of the base model
+base_model = model.layers[1]
+base_model.trainable = True
+for layer in base_model.layers[-30:]:
+    layer.trainable = True
+
+# Recompile the model
+model.compile(
+    optimizer=Adam(learning_rate=0.0001),
+    loss='categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+# Train the model again (fine-tuning)
+history_fine = model.fit(
+    train_tf_dataset,
+    epochs=10,
+    validation_data=validation_tf_dataset,
+    callbacks=[
+        early_stopping,
+        reduce_lr,
+        model_checkpoint,
+        DetailedLoggingCallback(10, steps_per_epoch)
+    ]
+)
+
+# Evaluate the fine-tuned model
+evaluation = model.evaluate(validation_tf_dataset)
+logging.info(f"Final Validation Loss: {evaluation[0]:.4f}")
+logging.info(f"Final Validation Accuracy: {evaluation[1]:.4f}")
+
+# Save the final fine-tuned model
+model.save('food_classification_final_finetuned_model.keras')
+logging.info("Final fine-tuned model saved as 'food_classification_final_finetuned_model.keras'")
+
+# Plot fine-tuning history
+plt.figure(figsize=(12, 4))
+plt.subplot(1, 2, 1)
+plt.plot(history_fine.history['accuracy'], label='Training Accuracy')
+plt.plot(history_fine.history['val_accuracy'], label='Validation Accuracy')
+plt.title('Fine-tuning Model Accuracy')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.legend()
+
+plt.subplot(1, 2, 2)
+plt.plot(history_fine.history['loss'], label='Training Loss')
+plt.plot(history_fine.history['val_loss'], label='Validation Loss')
+plt.title('Fine-tuning Model Loss')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend()
+
+plt.tight_layout()
+plt.savefig('finetuning_history.png')
+logging.info("Fine-tuning history plot saved as 'finetuning_history.png'")
