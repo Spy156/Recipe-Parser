@@ -1,187 +1,171 @@
 import tensorflow as tf
-from tensorflow.keras.applications import MobileNetV2
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
-from tensorflow.keras import mixed_precision
-from tensorflow.keras.optimizers import Adam
-from datasets import load_dataset  # Ensure this library is installed
-import logging
+from keras.applications.inception_v3 import InceptionV3
+from keras.layers import Input, Dense, Dropout, Flatten, AveragePooling2D
+from keras.callbacks import ModelCheckpoint, CSVLogger, LearningRateScheduler
+from keras.optimizers import SGD
+from keras.regularizers import l2
+from datasets import load_dataset
 import numpy as np
 import matplotlib.pyplot as plt
-import random
 import os
 import time
 
 # Suppress TensorFlow warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-# Enable mixed precision for faster training on modern GPUs
-policy = mixed_precision.Policy('mixed_float16')
-mixed_precision.set_global_policy(policy)
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
 # Set random seed for reproducibility
 tf.random.set_seed(42)
-random.seed(42)
 np.random.seed(42)
 
-# Image and model configuration
-IMG_SIZE = (160, 160)  # Reduced image size for faster processing and less memory usage
+# Configuration for training
+IMG_SIZE = (224, 224)
 BATCH_SIZE = 32
-EPOCHS = 10
+EPOCHS = 50
+TRAIN_SIZE_PER_CLASS = 750
+TEST_SIZE_PER_CLASS = 250
 
-# Check TensorFlow GPU support
-logging.info(f"TensorFlow version: {tf.__version__}")
-logging.info(f"Is built with CUDA: {tf.test.is_built_with_cuda()}")
-logging.info(f"Num GPUs Available: {len(tf.config.list_physical_devices('GPU'))}")
+# Learning rate scheduler
+def schedule(epoch):
+    if epoch < 5:
+        return 0.001
+    elif epoch < 10:
+        return 0.0002
+    elif epoch < 15:
+        return 0.00002
+    else:
+        return 0.0000005
 
-physical_devices = tf.config.list_physical_devices('GPU')
-if physical_devices:
-    logging.info(f"TensorFlow detected {len(physical_devices)} GPU(s): {physical_devices}")
-    for gpu in physical_devices:
-        tf.config.experimental.set_memory_growth(gpu, True)
-else:
-    logging.warning("No GPU detected, training will use the CPU.")
-    # Consider adding more explicit handling for CPU-only environments
+# Load the Food101 dataset and split it into train/test
+def load_and_split_dataset():
+    dataset = load_dataset("food101")
+    train_dataset = dataset['train']
+    test_dataset = dataset['validation']
 
-# Load the Food101 dataset
-logging.info("Loading the Food101 dataset...")
-try:
-    ds = load_dataset("food101", split=['train', 'validation'])
-    train_ds = ds[0]
-    validation_ds = ds[1]
-    num_classes = train_ds.features['label'].num_classes
+    # Take 750 samples per class for training and 250 for testing
+    train_samples = train_dataset.shuffle(seed=42).select(range(TRAIN_SIZE_PER_CLASS))
+    test_samples = test_dataset.shuffle(seed=42).select(range(TEST_SIZE_PER_CLASS))
 
-    logging.info(f"Training set size: {len(train_ds)}")
-    logging.info(f"Validation set size: {len(validation_ds)}")
-except Exception as e:
-    logging.error(f"Error loading dataset: {str(e)}")
-    raise
-    # Consider adding more specific error handling and recovery options
+    return train_samples, test_samples
 
-# Data augmentation for training
-def augment(image):
-    image = tf.image.random_flip_left_right(image)
-    image = tf.image.random_brightness(image, max_delta=0.2)
-    image = tf.image.random_contrast(image, lower=0.8, upper=1.2)
-    return image
+# Preprocessing function
+def preprocess_image(example):
+    image = example['image']
+    label = example['label']
 
-# Preprocess images
-def preprocess_image(image, label):
+    # Resize and normalize images
     image = tf.image.resize(image, IMG_SIZE)
     image = tf.cast(image, tf.float32) / 255.0  # Normalize to [0, 1]
-    image = augment(image)
-    label = tf.one_hot(label, depth=num_classes)
+    label = tf.one_hot(label, depth=101)  # 101 classes in the dataset
+
     return image, label
 
 # Convert dataset to TensorFlow dataset
-def to_tf_dataset(dataset, is_train=True):
-    tf_dataset = tf.data.Dataset.from_tensor_slices((
-        [example['image'] for example in dataset],
-        [example['label'] for example in dataset]
-    ))
-
-    if is_train:
-        tf_dataset = tf_dataset.shuffle(10000, reshuffle_each_iteration=True)
-    
+def to_tf_dataset(dataset):
+    tf_dataset = tf.data.Dataset.from_generator(
+        lambda: ((example['image'], example['label']) for example in dataset),
+        output_signature=(
+            tf.TensorSpec(shape=IMG_SIZE + (3,), dtype=tf.float32),
+            tf.TensorSpec(shape=(), dtype=tf.int64)
+        )
+    )
     tf_dataset = tf_dataset.map(preprocess_image, num_parallel_calls=tf.data.AUTOTUNE)
     tf_dataset = tf_dataset.batch(BATCH_SIZE)
     tf_dataset = tf_dataset.prefetch(tf.data.AUTOTUNE)
-    
     return tf_dataset
 
-# Convert train and validation datasets
-train_tf_dataset = to_tf_dataset(train_ds, is_train=True).apply(tf.data.experimental.ignore_errors())
-validation_tf_dataset = to_tf_dataset(validation_ds, is_train=False).apply(tf.data.experimental.ignore_errors())
+# Load datasets
+train_ds, test_ds = load_and_split_dataset()
+train_tf_dataset = to_tf_dataset(train_ds)
+test_tf_dataset = to_tf_dataset(test_ds)
 
-# Create the model with MobileNetV2
-def create_food_classification_model(input_shape, num_classes):
-    base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=input_shape)
+# Create the InceptionV3-based model
+input_tensor = Input(shape=(*IMG_SIZE, 3))
+base_model = InceptionV3(weights='imagenet', include_top=False, input_tensor=input_tensor)
 
-    # Freeze the base model initially
-    base_model.trainable = False
+x = base_model.output
+x = AveragePooling2D()(x)
+x = Flatten()(x)
+x = Dropout(0.5)(x)
+predictions = Dense(101, kernel_initializer='glorot_uniform', kernel_regularizer=l2(0.0005), activation='softmax')(x)
 
-    # Add final layers for classification
-    model = tf.keras.Sequential([
-        base_model,
-        tf.keras.layers.GlobalAveragePooling2D(),
-        tf.keras.layers.BatchNormalization(),
-        tf.keras.layers.Dense(128, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001)),  # Regularization added
-        tf.keras.layers.Dropout(0.4),  # Dropout for regularization
-        tf.keras.layers.Dense(num_classes, activation='softmax')
-    ])
-
-    return model
-
-# Create and compile the model
-with tf.device('/GPU:0'):
-    model = create_food_classification_model((*IMG_SIZE, 3), num_classes)
-
-model.summary()
+model = tf.keras.Model(inputs=base_model.input, outputs=predictions)
 
 # Compile the model
-initial_learning_rate = 1e-3
-lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-    initial_learning_rate, decay_steps=1000, decay_rate=0.9, staircase=True
-)
-
-optimizer = Adam(learning_rate=lr_schedule)
-model.compile(
-    optimizer=optimizer,
-    loss='categorical_crossentropy',
-    metrics=['accuracy']
-)
+opt = SGD(learning_rate=0.1, momentum=0.9)
+model.compile(optimizer=opt, loss='categorical_crossentropy', metrics=['accuracy'])
 
 # Callbacks
-model_checkpoint = ModelCheckpoint(
-    'food_classification_best_model.h5', save_best_only=True, monitor='val_accuracy', mode='max', verbose=1
-)
-early_stopping = EarlyStopping(monitor='val_accuracy', patience=3, restore_best_weights=True)  # Early stopping after 3 epochs
-reduce_lr = ReduceLROnPlateau(monitor='val_accuracy', factor=0.2, patience=2, min_lr=1e-6)
+checkpointer = ModelCheckpoint(filepath='recipe_image_classification_model.h5', verbose=1, save_best_only=True)
+csv_logger = CSVLogger('training_log.csv')
+lr_scheduler = LearningRateScheduler(schedule)
 
+# Plotting function for accuracy and loss
+def plot_training_history(history):
+    acc = history.history['accuracy']
+    val_acc = history.history['val_accuracy']
+    loss = history.history['loss']
+    val_loss = history.history['val_loss']
+    epochs = range(1, len(acc) + 1)
+
+    plt.figure(figsize=(14, 5))
+
+    # Accuracy plot
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, acc, 'b', label='Training accuracy')
+    plt.plot(epochs, val_acc, 'r', label='Validation accuracy')
+    plt.title('Training and validation accuracy')
+    plt.xlabel('Epochs')
+    plt.ylabel('Accuracy')
+    plt.legend()
+
+    # Loss plot
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs, loss, 'b', label='Training loss')
+    plt.plot(epochs, val_loss, 'r', label='Validation loss')
+    plt.title('Training and validation loss')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+
+    # Save the figure
+    plt.savefig('training_accuracy_loss.png')
+    plt.show()
+
+# Training the model with detailed logging
 class DetailedLoggingCallback(tf.keras.callbacks.Callback):
-    def __init__(self, num_epochs):
-        super().__init__()
-        self.num_epochs = num_epochs
-        self.start_time = None
-
-    def on_train_begin(self, logs=None):
-        self.start_time = time.time()
-        logging.info(f"Starting training for {self.num_epochs} epochs")
-
     def on_epoch_begin(self, epoch, logs=None):
-        logging.info(f"Starting epoch {epoch + 1}/{self.num_epochs}")
+        self.start_time = time.time()
+        print(f"Epoch {epoch + 1}/{EPOCHS} begins")
 
     def on_epoch_end(self, epoch, logs=None):
         epoch_time = time.time() - self.start_time
-        logging.info(f"Epoch {epoch + 1}/{self.num_epochs} completed in {epoch_time:.2f} seconds")
-        logging.info(f"Epoch {epoch + 1} - Loss: {logs['loss']:.4f}, Accuracy: {logs['accuracy']:.4f}, "
-                     f"Val Loss: {logs['val_loss']:.4f}, Val Accuracy: {logs['val_accuracy']:.4f}")
+        print(f"Epoch {epoch + 1}/{EPOCHS} completed in {epoch_time:.2f} seconds")
+        print(f"Loss: {logs['loss']:.4f}, Accuracy: {logs['accuracy']:.4f}, "
+              f"Val Loss: {logs['val_loss']:.4f}, Val Accuracy: {logs['val_accuracy']:.4f}")
 
-    def on_train_end(self, logs=None):
-        total_time = time.time() - self.start_time
-        logging.info(f"Training completed in {total_time:.2f} seconds")
+# Train the model
+history = model.fit(
+    train_tf_dataset,
+    validation_data=test_tf_dataset,
+    epochs=EPOCHS,
+    callbacks=[checkpointer, csv_logger, lr_scheduler, DetailedLoggingCallback()]
+)
 
-# Training the model
-try:
-    logging.info("Training the model...")
-    with tf.device('/GPU:0'):
-        history = model.fit(
-            train_tf_dataset,
-            validation_data=validation_tf_dataset,
-            epochs=EPOCHS,
-            callbacks=[early_stopping, reduce_lr, model_checkpoint, DetailedLoggingCallback(EPOCHS)]
-        )
+# Plot and save the accuracy and loss
+plot_training_history(history)
 
-    logging.info("Model training completed successfully")
+# Save the final model
+model.save('recipe_image_classification_model.h5')
 
-    # Save the final model
-    model.save('food_classification_final_model.h5')
-    logging.info("Final model saved as 'food_classification_final_model.h5'")
+# Log the successful completion of the training process
+print("Model is trained successfully!")
 
-except Exception as e:
-    logging.error(f"An error occurred during training: {str(e)}")
-    raise
-    # Consider adding more specific error handling and recovery options
+# Test with one image from the test dataset and log the result
+for image_batch, label_batch in test_tf_dataset.take(1):
+    predictions = model.predict(image_batch)
+    predicted_label = np.argmax(predictions[0])
+    true_label = np.argmax(label_batch[0])
 
-# Consider adding code here for model evaluation, prediction examples, or deployment steps
+    print(f"True Label: {true_label}, Predicted Label: {predicted_label}")
+    break
+
