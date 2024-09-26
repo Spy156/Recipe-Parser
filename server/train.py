@@ -1,5 +1,5 @@
 import tensorflow as tf
-from tensorflow.keras.applications import EfficientNetB0
+from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 from tensorflow.keras import mixed_precision
 from tensorflow.keras.optimizers import Adam
@@ -14,7 +14,7 @@ import time
 # Suppress TensorFlow warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-# Enable mixed precision
+# Enable mixed precision for faster training on modern GPUs
 policy = mixed_precision.Policy('mixed_float16')
 mixed_precision.set_global_policy(policy)
 
@@ -26,9 +26,9 @@ random.seed(42)
 np.random.seed(42)
 
 # Image and model configuration
-IMG_SIZE = (224, 224)  # You can also reduce this to (160, 160) or (128, 128)
-BATCH_SIZE = 32  # Adjust based on available memory
-EPOCHS = 10  # Reduced from 50
+IMG_SIZE = (160, 160)  # Reduced image size for faster processing and less memory usage
+BATCH_SIZE = 32
+EPOCHS = 10
 AUTOTUNE = tf.data.AUTOTUNE
 
 # Check TensorFlow GPU support
@@ -58,17 +58,17 @@ except Exception as e:
     logging.error(f"Error loading dataset: {str(e)}")
     raise
 
-# Data augmentation
+# Data augmentation for training
 def augment(image):
     image = tf.image.random_flip_left_right(image)
     image = tf.image.random_brightness(image, max_delta=0.2)
     image = tf.image.random_contrast(image, lower=0.8, upper=1.2)
     return image
 
-# Function to preprocess the image data
+# Preprocess images
 def preprocess_image(image, label):
     image = tf.image.resize(image, IMG_SIZE)
-    image = tf.cast(image, tf.float32) / 255.0
+    image = tf.cast(image, tf.float32) / 255.0  # Normalize to [0, 1]
     image = augment(image)
     label = tf.one_hot(label, depth=num_classes)
     return image, label
@@ -93,19 +93,20 @@ def to_tf_dataset(dataset, is_train=True):
 train_tf_dataset = to_tf_dataset(train_ds, is_train=True).apply(tf.data.experimental.ignore_errors())
 validation_tf_dataset = to_tf_dataset(validation_ds, is_train=False).apply(tf.data.experimental.ignore_errors())
 
-# Create the model
+# Create the model with MobileNetV2
 def create_food_classification_model(input_shape, num_classes):
-    base_model = EfficientNetB0(weights='imagenet', include_top=False, input_shape=input_shape)
+    base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=input_shape)
 
     # Freeze the base model initially
     base_model.trainable = False
 
+    # Add final layers for classification
     model = tf.keras.Sequential([
         base_model,
         tf.keras.layers.GlobalAveragePooling2D(),
         tf.keras.layers.BatchNormalization(),
-        tf.keras.layers.Dense(128, activation='relu'),  # Reduce Dense layer size for efficiency
-        tf.keras.layers.Dropout(0.3),  # Slightly lower dropout for efficiency
+        tf.keras.layers.Dense(128, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001)),  # Regularization added
+        tf.keras.layers.Dropout(0.4),  # Dropout for regularization
         tf.keras.layers.Dense(num_classes, activation='softmax')
     ])
 
@@ -134,8 +135,8 @@ model.compile(
 model_checkpoint = ModelCheckpoint(
     'food_classification_best_model.keras', save_best_only=True, monitor='val_accuracy', mode='max', verbose=1
 )
-early_stopping = EarlyStopping(monitor='val_accuracy', patience=5, restore_best_weights=True)
-reduce_lr = ReduceLROnPlateau(monitor='val_accuracy', factor=0.2, patience=3, min_lr=1e-6)
+early_stopping = EarlyStopping(monitor='val_accuracy', patience=3, restore_best_weights=True)  # Early stopping after 3 epochs
+reduce_lr = ReduceLROnPlateau(monitor='val_accuracy', factor=0.2, patience=2, min_lr=1e-6)
 
 class DetailedLoggingCallback(tf.keras.callbacks.Callback):
     def __init__(self, num_epochs):
