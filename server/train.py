@@ -25,6 +25,9 @@ tf.random.set_seed(42)
 np.random.seed(42)
 
 # Image and model configuration
+IMG_SIZE = (224, 224)
+BATCH_SIZE = 512
+EPOCHS = 50
 IMG_SIZE = (160, 160)
 BATCH_SIZE = 32
 EPOCHS = 2
@@ -99,6 +102,11 @@ lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(1e-3, decay_steps=1
 model.compile(optimizer=Adam(learning_rate=lr_schedule), loss='categorical_crossentropy', metrics=['accuracy'])
 
 # Callbacks
+model_checkpoint = ModelCheckpoint(
+    'food_classification_best_model.h5', save_best_only=True, monitor='val_loss', verbose=1
+)
+early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
 callbacks = [
     ModelCheckpoint('food_classification_best_model.h5', save_best_only=True, monitor='val_accuracy', mode='max', verbose=1),
     EarlyStopping(monitor='val_accuracy', patience=3, restore_best_weights=True),
@@ -133,3 +141,7 @@ try:
 except Exception as e:
     logging.error(f"Training failed: {str(e)}")
     raise
+
+# Save the final model
+model.save('food_classification_final_model.h5')
+logging.info("Final model saved as 'food_classification_final_model.h5'")
