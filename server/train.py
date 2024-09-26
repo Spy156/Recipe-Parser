@@ -6,7 +6,6 @@ from tensorflow.keras.optimizers import Adam
 from datasets import load_dataset
 import logging
 import numpy as np
-from PIL import Image
 import matplotlib.pyplot as plt
 import random
 import os
@@ -68,22 +67,19 @@ def augment(image):
     return image
 
 # Function to preprocess the image data
-def preprocess_image(example):
-    image = tf.image.resize(example['image'], IMG_SIZE)
+def preprocess_image(image, label):
+    image = tf.image.resize(image, IMG_SIZE)
     image = tf.cast(image, tf.float32) / 255.0
     image = augment(image)
-    label = tf.one_hot(example['label'], depth=num_classes)
+    label = tf.one_hot(label, depth=num_classes)
     return image, label
 
 # Convert dataset to TensorFlow dataset
 def to_tf_dataset(dataset, is_train=True):
-    tf_dataset = tf.data.Dataset.from_generator(
-        lambda: map(lambda x: (x['image'], x['label']), dataset),
-        output_signature=(
-            tf.TensorSpec(shape=(None, None, 3), dtype=tf.uint8),
-            tf.TensorSpec(shape=(), dtype=tf.int64)
-        )
-    )
+    tf_dataset = tf.data.Dataset.from_tensor_slices((
+        [example['image'] for example in dataset],
+        [example['label'] for example in dataset]
+    ))
     
     if is_train:
         tf_dataset = tf_dataset.shuffle(10000, reshuffle_each_iteration=True)
