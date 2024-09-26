@@ -29,7 +29,6 @@ np.random.seed(42)
 IMG_SIZE = (160, 160)  # Reduced image size for faster processing and less memory usage
 BATCH_SIZE = 32
 EPOCHS = 10
-AUTOTUNE = tf.data.AUTOTUNE
 
 # Check TensorFlow GPU support
 logging.info(f"TensorFlow version: {tf.__version__}")
@@ -182,4 +181,6 @@ except Exception as e:
     logging.error(f"An error occurred during training: {str(e)}")
     raise
 
-logging.info("Training completed!")
+# Save the final model
+model.save('food_classification_final_model.keras')
+logging.info("Final model saved as 'food_classification_final_model.keras'")
