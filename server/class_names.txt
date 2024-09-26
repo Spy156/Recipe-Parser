@@ -14,8 +14,8 @@ cannoli
 caprese_salad
 carrot_cake
 ceviche
-cheesecake
 cheese_plate
+cheesecake
 chicken_curry
 chicken_quesadilla
 chicken_wings

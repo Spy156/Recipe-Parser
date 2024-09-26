@@ -1,10 +1,10 @@
 import React, { useState, useRef } from 'react';
 import axios from 'axios';
 
-interface Ingredient {
-  name: string;
-  amount: string;
-}
+// interface Ingredient {
+//   name: string;
+//   amount: string;
+// }
 
 interface Recipe {
   name: string;
@@ -39,7 +39,7 @@ const RecipeParser: React.FC = () => {
     setRecipe(null);
 
     try {
-      const response = await axios.post('http://localhost:5000/predict', {
+      const response = await axios.post(`ADDRESS}/predict`, {
         dish_name: dishName,
         num_people: numPeople
       });
@@ -69,7 +69,7 @@ const RecipeParser: React.FC = () => {
     formData.append('image', file);
 
     try {
-      const response = await axios.post('http://localhost:5000/analyze-image', formData, {
+      const response = await axios.post(`${import.meta.env.VITE_SERVER_}/analyze-image`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       console.log('Server response:', response.data);

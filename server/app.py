@@ -5,7 +5,6 @@ from recipe_parser import RecipeParser
 import tensorflow as tf
 from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.preprocessing.image import img_to_array
-from tensorflow.keras.layers import DepthwiseConv2D
 import numpy as np
 import os
 from PIL import Image
@@ -19,19 +18,9 @@ CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}})
 
 recipe_parser = RecipeParser()
 
-# Custom DepthwiseConv2D layer
-class CustomDepthwiseConv2D(DepthwiseConv2D):
-    def __init__(self, *args, **kwargs):
-        groups = kwargs.pop('groups', None)
-        super().__init__(*args, **kwargs)
-
 # Load the model
 try:
-    with tf.keras.utils.custom_object_scope({
-        'MobileNetV2': MobileNetV2,
-        'DepthwiseConv2D': CustomDepthwiseConv2D
-    }):
-        food_model = tf.keras.models.load_model('food_classification_best_model.h5')
+    food_model = tf.keras.models.load_model('food_recognition_model.h5')
     logging.info("Model loaded successfully")
 except Exception as e:
     logging.error(f"Error loading model: {str(e)}")
