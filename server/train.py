@@ -1,5 +1,5 @@
 import tensorflow as tf
-from tensorflow.keras.applications.mobilenet_v2 import preprocess_input, MobileNetV2
+from tensorflow.keras.applications import EfficientNetB0
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 from tensorflow.keras import mixed_precision
 from tensorflow.keras.optimizers import Adam
@@ -31,6 +31,7 @@ np.random.seed(42)
 IMG_SIZE = (224, 224)
 BATCH_SIZE = 32
 EPOCHS = 50
+AUTOTUNE = tf.data.AUTOTUNE
 
 # Check TensorFlow GPU support
 logging.info(f"TensorFlow version: {tf.__version__}")
@@ -59,60 +60,60 @@ except Exception as e:
     logging.error(f"Error loading dataset: {str(e)}")
     raise
 
+# Data augmentation
+def augment(image):
+    image = tf.image.random_flip_left_right(image)
+    image = tf.image.random_brightness(image, max_delta=0.2)
+    image = tf.image.random_contrast(image, lower=0.8, upper=1.2)
+    return image
+
 # Function to preprocess the image data
 def preprocess_image(example):
-    image = example['image'].resize(IMG_SIZE)
-    if image.mode != 'RGB':
-        image = image.convert('RGB')
-    image = np.array(image, dtype=np.float32)
-    image = preprocess_input(image)
+    image = tf.image.resize(example['image'], IMG_SIZE)
+    image = tf.cast(image, tf.float32) / 255.0
+    image = augment(image)
     label = tf.one_hot(example['label'], depth=num_classes)
     return image, label
 
 # Convert dataset to TensorFlow dataset
-def to_tf_dataset(dataset):
-    return tf.data.Dataset.from_generator(
-        lambda: map(preprocess_image, dataset),
-        output_signature=(tf.TensorSpec(shape=(IMG_SIZE[0], IMG_SIZE[1], 3), dtype=tf.float32),
-                          tf.TensorSpec(shape=(num_classes,), dtype=tf.float32))
-    ).shuffle(1000).batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+def to_tf_dataset(dataset, is_train=True):
+    tf_dataset = tf.data.Dataset.from_generator(
+        lambda: map(lambda x: (x['image'], x['label']), dataset),
+        output_signature=(
+            tf.TensorSpec(shape=(None, None, 3), dtype=tf.uint8),
+            tf.TensorSpec(shape=(), dtype=tf.int64)
+        )
+    )
+    
+    if is_train:
+        tf_dataset = tf_dataset.shuffle(10000, reshuffle_each_iteration=True)
+    
+    tf_dataset = tf_dataset.map(preprocess_image, num_parallel_calls=AUTOTUNE)
+    tf_dataset = tf_dataset.batch(BATCH_SIZE)
+    tf_dataset = tf_dataset.prefetch(AUTOTUNE)
+    
+    return tf_dataset
 
 # Convert train and validation datasets
-train_tf_dataset = to_tf_dataset(train_ds)
-validation_tf_dataset = to_tf_dataset(validation_ds)
-
-# Inspect a few samples from the dataset
-for images, labels in train_tf_dataset.take(1):
-    for i in range(3):
-        plt.figure(figsize=(5,5))
-        plt.imshow(images[i] / 2 + 0.5)  # De-normalize the image
-        plt.title(f"Shape: {images[i].shape}")
-        plt.axis('off')
-        plt.show()
+train_tf_dataset = to_tf_dataset(train_ds, is_train=True)
+validation_tf_dataset = to_tf_dataset(validation_ds, is_train=False)
 
 # Create the model
 def create_food_classification_model(input_shape, num_classes):
-    base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=input_shape)
+    base_model = EfficientNetB0(weights='imagenet', include_top=False, input_shape=input_shape)
 
-    # Freeze the entire base model initially
+    # Freeze the base model initially
     base_model.trainable = False
 
-    x = base_model.output
-    x = tf.keras.layers.GlobalAveragePooling2D()(x)
-    x = tf.keras.layers.Dense(512, activation='relu', kernel_initializer='he_normal')(x)
-    x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.Dropout(0.3)(x)
-    x = tf.keras.layers.Dense(256, activation='relu', kernel_initializer='he_normal')(x)
-    x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.Dropout(0.3)(x)
-    predictions = tf.keras.layers.Dense(num_classes, activation='softmax')(x)
+    model = tf.keras.Sequential([
+        base_model,
+        tf.keras.layers.GlobalAveragePooling2D(),
+        tf.keras.layers.BatchNormalization(),
+        tf.keras.layers.Dense(256, activation='relu'),
+        tf.keras.layers.Dropout(0.5),
+        tf.keras.layers.Dense(num_classes, activation='softmax')
+    ])
 
-    model = tf.keras.Model(inputs=base_model.input, outputs=predictions)
-
-    optimizer = Adam(learning_rate=0.001)  # Increased initial learning rate
-    model.compile(optimizer=optimizer,
-                  loss='categorical_crossentropy',
-                  metrics=['accuracy'])
     return model
 
 # Create and compile the model
@@ -121,20 +122,25 @@ with tf.device('/GPU:0'):
 
 model.summary()
 
+# Compile the model
+initial_learning_rate = 1e-3
+lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+    initial_learning_rate, decay_steps=1000, decay_rate=0.9, staircase=True
+)
+
+optimizer = Adam(learning_rate=lr_schedule)
+model.compile(
+    optimizer=optimizer,
+    loss='categorical_crossentropy',
+    metrics=['accuracy']
+)
+
 # Callbacks
 model_checkpoint = ModelCheckpoint(
-    'food_classification_best_model.keras', save_best_only=True, monitor='val_loss', verbose=1
+    'food_classification_best_model.keras', save_best_only=True, monitor='val_accuracy', mode='max', verbose=1
 )
-early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=1e-6)
-
-def lr_schedule(epoch):
-    if epoch < 10:
-        return 0.001
-    else:
-        return 0.001 * tf.math.exp(0.1 * (10 - epoch))
-
-lr_scheduler = tf.keras.callbacks.LearningRateScheduler(lr_schedule)
+early_stopping = EarlyStopping(monitor='val_accuracy', patience=10, restore_best_weights=True)
+reduce_lr = ReduceLROnPlateau(monitor='val_accuracy', factor=0.2, patience=5, min_lr=1e-6)
 
 class DetailedLoggingCallback(tf.keras.callbacks.Callback):
     def __init__(self, num_epochs):
@@ -159,9 +165,6 @@ class DetailedLoggingCallback(tf.keras.callbacks.Callback):
         total_time = time.time() - self.start_time
         logging.info(f"Training completed in {total_time:.2f} seconds")
 
-# Calculate steps per epoch
-steps_per_epoch = len(train_ds) // BATCH_SIZE
-
 # Training the model
 try:
     logging.info("Training the model...")
@@ -174,8 +177,7 @@ try:
                 early_stopping,
                 reduce_lr,
                 model_checkpoint,
-                DetailedLoggingCallback(EPOCHS),
-                lr_scheduler
+                DetailedLoggingCallback(EPOCHS)
             ]
         )
 
@@ -213,9 +215,6 @@ try:
     logging.info(f"Validation Loss: {evaluation[0]:.4f}")
     logging.info(f"Validation Accuracy: {evaluation[1]:.4f}")
 
-except tf.errors.InvalidArgumentError as e:
-    logging.error(f"InvalidArgumentError occurred: {str(e)}")
-    logging.error("This might be due to inconsistent image shapes in the dataset.")
 except Exception as e:
     logging.error(f"An error occurred during training: {str(e)}")
     raise
@@ -228,14 +227,16 @@ logging.info("Final model saved as 'food_classification_final_model.keras'")
 logging.info("Starting fine-tuning...")
 
 # Unfreeze the top layers of the base model
-base_model = model.layers[1]
+base_model = model.layers[0]
 base_model.trainable = True
 for layer in base_model.layers[-30:]:
     layer.trainable = True
 
-# Recompile the model
+# Recompile the model with a lower learning rate
+fine_tune_lr = 1e-5
+fine_tune_optimizer = Adam(learning_rate=fine_tune_lr)
 model.compile(
-    optimizer=Adam(learning_rate=0.0001),
+    optimizer=fine_tune_optimizer,
     loss='categorical_crossentropy',
     metrics=['accuracy']
 )
@@ -247,12 +248,12 @@ try:
         fine_tune_history = model.fit(
             train_tf_dataset,
             validation_data=validation_tf_dataset,
-            epochs=EPOCHS,
+            epochs=EPOCHS // 2,  # Fine-tune for fewer epochs
             callbacks=[
                 early_stopping,
                 reduce_lr,
                 model_checkpoint,
-                DetailedLoggingCallback(EPOCHS)
+                DetailedLoggingCallback(EPOCHS // 2)
             ]
         )
 
@@ -260,6 +261,35 @@ try:
     model.save('food_classification_fine_tuned_model.keras')
     logging.info("Fine-tuned model saved as 'food_classification_fine_tuned_model.keras'")
 
+    # Plot fine-tuning history
+    plt.figure(figsize=(12, 4))
+    plt.subplot(1, 2, 1)
+    plt.plot(fine_tune_history.history['accuracy'], label='Training Accuracy')
+    plt.plot(fine_tune_history.history['val_accuracy'], label='Validation Accuracy')
+    plt.title('Fine-tuned Model Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend()
+
+    plt.subplot(1, 2, 2)
+    plt.plot(fine_tune_history.history['loss'], label='Training Loss')
+    plt.plot(fine_tune_history.history['val_loss'], label='Validation Loss')
+    plt.title('Fine-tuned Model Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig('fine_tuning_history.png')
+    logging.info("Fine-tuning history plot saved as 'fine_tuning_history.png'")
+
+    # Evaluate the fine-tuned model
+    fine_tuned_evaluation = model.evaluate(validation_tf_dataset)
+    logging.info(f"Fine-tuned Validation Loss: {fine_tuned_evaluation[0]:.4f}")
+    logging.info(f"Fine-tuned Validation Accuracy: {fine_tuned_evaluation[1]:.4f}")
+
 except Exception as e:
     logging.error(f"An error occurred during fine-tuning: {str(e)}")
     raise
+
+logging.info("Training and fine-tuning completed successfully!")
