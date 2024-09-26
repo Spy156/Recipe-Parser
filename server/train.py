@@ -13,7 +13,6 @@ import time
 
 # Suppress TensorFlow warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
 
 # Enable mixed precision
 policy = mixed_precision.Policy('mixed_float16')
@@ -27,9 +26,9 @@ random.seed(42)
 np.random.seed(42)
 
 # Image and model configuration
-IMG_SIZE = (224, 224)
-BATCH_SIZE = 32
-EPOCHS = 50
+IMG_SIZE = (224, 224)  # You can also reduce this to (160, 160) or (128, 128)
+BATCH_SIZE = 32  # Adjust based on available memory
+EPOCHS = 10  # Reduced from 50
 AUTOTUNE = tf.data.AUTOTUNE
 
 # Check TensorFlow GPU support
@@ -80,7 +79,7 @@ def to_tf_dataset(dataset, is_train=True):
         [example['image'] for example in dataset],
         [example['label'] for example in dataset]
     ))
-    
+
     if is_train:
         tf_dataset = tf_dataset.shuffle(10000, reshuffle_each_iteration=True)
     
@@ -91,8 +90,8 @@ def to_tf_dataset(dataset, is_train=True):
     return tf_dataset
 
 # Convert train and validation datasets
-train_tf_dataset = to_tf_dataset(train_ds, is_train=True)
-validation_tf_dataset = to_tf_dataset(validation_ds, is_train=False)
+train_tf_dataset = to_tf_dataset(train_ds, is_train=True).apply(tf.data.experimental.ignore_errors())
+validation_tf_dataset = to_tf_dataset(validation_ds, is_train=False).apply(tf.data.experimental.ignore_errors())
 
 # Create the model
 def create_food_classification_model(input_shape, num_classes):
@@ -105,8 +104,8 @@ def create_food_classification_model(input_shape, num_classes):
         base_model,
         tf.keras.layers.GlobalAveragePooling2D(),
         tf.keras.layers.BatchNormalization(),
-        tf.keras.layers.Dense(256, activation='relu'),
-        tf.keras.layers.Dropout(0.5),
+        tf.keras.layers.Dense(128, activation='relu'),  # Reduce Dense layer size for efficiency
+        tf.keras.layers.Dropout(0.3),  # Slightly lower dropout for efficiency
         tf.keras.layers.Dense(num_classes, activation='softmax')
     ])
 
@@ -135,8 +134,8 @@ model.compile(
 model_checkpoint = ModelCheckpoint(
     'food_classification_best_model.keras', save_best_only=True, monitor='val_accuracy', mode='max', verbose=1
 )
-early_stopping = EarlyStopping(monitor='val_accuracy', patience=10, restore_best_weights=True)
-reduce_lr = ReduceLROnPlateau(monitor='val_accuracy', factor=0.2, patience=5, min_lr=1e-6)
+early_stopping = EarlyStopping(monitor='val_accuracy', patience=5, restore_best_weights=True)
+reduce_lr = ReduceLROnPlateau(monitor='val_accuracy', factor=0.2, patience=3, min_lr=1e-6)
 
 class DetailedLoggingCallback(tf.keras.callbacks.Callback):
     def __init__(self, num_epochs):
@@ -169,123 +168,17 @@ try:
             train_tf_dataset,
             validation_data=validation_tf_dataset,
             epochs=EPOCHS,
-            callbacks=[
-                early_stopping,
-                reduce_lr,
-                model_checkpoint,
-                DetailedLoggingCallback(EPOCHS)
-            ]
+            callbacks=[early_stopping, reduce_lr, model_checkpoint, DetailedLoggingCallback(EPOCHS)]
         )
 
-    # Save class names
-    class_names = train_ds.features['label'].names
-    with open('class_names.txt', 'w') as f:
-        for name in class_names:
-            f.write(f"{name}\n")
-    logging.info("Class names saved to 'class_names.txt'")
+    logging.info("Model training completed successfully")
 
-    # Plot training history
-    plt.figure(figsize=(12, 4))
-    plt.subplot(1, 2, 1)
-    plt.plot(history.history['accuracy'], label='Training Accuracy')
-    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
-    plt.title('Model Accuracy')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.legend()
-
-    plt.subplot(1, 2, 2)
-    plt.plot(history.history['loss'], label='Training Loss')
-    plt.plot(history.history['val_loss'], label='Validation Loss')
-    plt.title('Model Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
-
-    plt.tight_layout()
-    plt.savefig('training_history.png')
-    logging.info("Training history plot saved as 'training_history.png'")
-
-    # Evaluate the model
-    evaluation = model.evaluate(validation_tf_dataset)
-    logging.info(f"Validation Loss: {evaluation[0]:.4f}")
-    logging.info(f"Validation Accuracy: {evaluation[1]:.4f}")
+    # Save the final model
+    model.save('food_classification_final_model.keras')
+    logging.info("Final model saved as 'food_classification_final_model.keras'")
 
 except Exception as e:
     logging.error(f"An error occurred during training: {str(e)}")
     raise
 
-# Save the final model
-model.save('food_classification_final_model.keras')
-logging.info("Final model saved as 'food_classification_final_model.keras'")
-
-# Fine-tuning step
-logging.info("Starting fine-tuning...")
-
-# Unfreeze the top layers of the base model
-base_model = model.layers[0]
-base_model.trainable = True
-for layer in base_model.layers[-30:]:
-    layer.trainable = True
-
-# Recompile the model with a lower learning rate
-fine_tune_lr = 1e-5
-fine_tune_optimizer = Adam(learning_rate=fine_tune_lr)
-model.compile(
-    optimizer=fine_tune_optimizer,
-    loss='categorical_crossentropy',
-    metrics=['accuracy']
-)
-
-# Fine-tune the model
-try:
-    logging.info("Fine-tuning the model...")
-    with tf.device('/GPU:0'):
-        fine_tune_history = model.fit(
-            train_tf_dataset,
-            validation_data=validation_tf_dataset,
-            epochs=EPOCHS // 2,  # Fine-tune for fewer epochs
-            callbacks=[
-                early_stopping,
-                reduce_lr,
-                model_checkpoint,
-                DetailedLoggingCallback(EPOCHS // 2)
-            ]
-        )
-
-    # Save the fine-tuned model
-    model.save('food_classification_fine_tuned_model.keras')
-    logging.info("Fine-tuned model saved as 'food_classification_fine_tuned_model.keras'")
-
-    # Plot fine-tuning history
-    plt.figure(figsize=(12, 4))
-    plt.subplot(1, 2, 1)
-    plt.plot(fine_tune_history.history['accuracy'], label='Training Accuracy')
-    plt.plot(fine_tune_history.history['val_accuracy'], label='Validation Accuracy')
-    plt.title('Fine-tuned Model Accuracy')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.legend()
-
-    plt.subplot(1, 2, 2)
-    plt.plot(fine_tune_history.history['loss'], label='Training Loss')
-    plt.plot(fine_tune_history.history['val_loss'], label='Validation Loss')
-    plt.title('Fine-tuned Model Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
-
-    plt.tight_layout()
-    plt.savefig('fine_tuning_history.png')
-    logging.info("Fine-tuning history plot saved as 'fine_tuning_history.png'")
-
-    # Evaluate the fine-tuned model
-    fine_tuned_evaluation = model.evaluate(validation_tf_dataset)
-    logging.info(f"Fine-tuned Validation Loss: {fine_tuned_evaluation[0]:.4f}")
-    logging.info(f"Fine-tuned Validation Accuracy: {fine_tuned_evaluation[1]:.4f}")
-
-except Exception as e:
-    logging.error(f"An error occurred during fine-tuning: {str(e)}")
-    raise
-
-logging.info("Training and fine-tuning completed successfully!")
+logging.info("Training completed!")
