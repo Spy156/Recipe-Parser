@@ -96,7 +96,6 @@ const RecipeParser: React.FC = () => {
   };
 
   const handleDownloadPDF = () => {
-    // Implement PDF download logic here
     console.log("Downloading PDF...");
   };
 
