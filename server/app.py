@@ -31,7 +31,7 @@ try:
         'MobileNetV2': MobileNetV2,
         'DepthwiseConv2D': CustomDepthwiseConv2D
     }):
-        food_model = tf.keras.models.load_model('food_classification_model.h5')
+        food_model = tf.keras.models.load_model('food_classification_final_model.h5')
     logging.info("Model loaded successfully")
 except Exception as e:
     logging.error(f"Error loading model: {str(e)}")

@@ -82,9 +82,9 @@ def to_tf_dataset(dataset, is_train=True):
     if is_train:
         tf_dataset = tf_dataset.shuffle(10000, reshuffle_each_iteration=True)
     
-    tf_dataset = tf_dataset.map(preprocess_image, num_parallel_calls=AUTOTUNE)
+    tf_dataset = tf_dataset.map(preprocess_image, num_parallel_calls=tf.data.AUTOTUNE)
     tf_dataset = tf_dataset.batch(BATCH_SIZE)
-    tf_dataset = tf_dataset.prefetch(AUTOTUNE)
+    tf_dataset = tf_dataset.prefetch(tf.data.AUTOTUNE)
     
     return tf_dataset
 
@@ -132,7 +132,7 @@ model.compile(
 
 # Callbacks
 model_checkpoint = ModelCheckpoint(
-    'food_classification_best_model.keras', save_best_only=True, monitor='val_accuracy', mode='max', verbose=1
+    'food_classification_best_model.h5', save_best_only=True, monitor='val_accuracy', mode='max', verbose=1
 )
 early_stopping = EarlyStopping(monitor='val_accuracy', patience=3, restore_best_weights=True)  # Early stopping after 3 epochs
 reduce_lr = ReduceLROnPlateau(monitor='val_accuracy', factor=0.2, patience=2, min_lr=1e-6)
@@ -174,13 +174,9 @@ try:
     logging.info("Model training completed successfully")
 
     # Save the final model
-    model.save('food_classification_final_model.keras')
-    logging.info("Final model saved as 'food_classification_final_model.keras'")
+    model.save('food_classification_final_model.h5')
+    logging.info("Final model saved as 'food_classification_final_model.h5'")
 
 except Exception as e:
     logging.error(f"An error occurred during training: {str(e)}")
     raise
-
-# Save the final model
-model.save('food_classification_final_model.keras')
-logging.info("Final model saved as 'food_classification_final_model.keras'")
