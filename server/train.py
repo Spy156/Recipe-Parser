@@ -29,8 +29,8 @@ np.random.seed(42)
 
 # Image and model configuration
 IMG_SIZE = (224, 224)
-BATCH_SIZE = 32
-EPOCHS = 50
+BATCH_SIZE = 512
+EPOCHS = 2
 
 # Check TensorFlow GPU support
 logging.info(f"TensorFlow version: {tf.__version__}")
@@ -123,7 +123,7 @@ model.summary()
 
 # Callbacks
 model_checkpoint = ModelCheckpoint(
-    'food_classification_best_model.h5', save_best_only=True, monitor='val_loss', verbose=1
+    'food_classification_best_model.keras', save_best_only=True, monitor='val_loss', verbose=1
 )
 early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
