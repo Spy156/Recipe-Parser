@@ -29,7 +29,7 @@ np.random.seed(42)
 
 # Image and model configuration
 IMG_SIZE = (224, 224)
-BATCH_SIZE = 32
+BATCH_SIZE = 512
 EPOCHS = 50
 
 # Check TensorFlow GPU support
