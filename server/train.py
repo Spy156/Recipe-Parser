@@ -30,7 +30,7 @@ np.random.seed(42)
 # Image and model configuration
 IMG_SIZE = (224, 224)
 BATCH_SIZE = 32
-EPOCHS = 50
+EPOCHS = 10
 
 # Check TensorFlow GPU support
 logging.info(f"TensorFlow version: {tf.__version__}")
