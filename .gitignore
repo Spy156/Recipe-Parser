@@ -1,2 +1,7 @@
 server/RAW_recipes.csv
 server/food_classification_model_final.h5
+old/food_classification_best_model.h5
+old/food_classification_best_model.keras
+old/food_classification_model_final.h5
+old/food_classification_final_model.keras
+old/food_classification_model.h5

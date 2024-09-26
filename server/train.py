@@ -123,7 +123,7 @@ model.summary()
 
 # Callbacks
 model_checkpoint = ModelCheckpoint(
-    'food_classification_best_model.keras', save_best_only=True, monitor='val_loss', verbose=1
+    'food_classification_best_model.h5', save_best_only=True, monitor='val_loss', verbose=1
 )
 early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
@@ -191,5 +191,5 @@ except Exception as e:
     raise
 
 # Save the final model
-model.save('food_classification_final_model.keras')
-logging.info("Final model saved as 'food_classification_final_model.keras'")
+model.save('food_classification_final_model.h5')
+logging.info("Final model saved as 'food_classification_final_model.h5'")
