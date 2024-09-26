@@ -1,5 +1,7 @@
 import React, { useState, useRef } from 'react';
 import axios from 'axios';
+import { Button, Input, Card, CardBody, CardHeader, Spinner, Image } from "@nextui-org/react";
+import { Download, Youtube } from 'lucide-react';
 
 // interface Ingredient {
 //   name: string;
@@ -72,7 +74,6 @@ const RecipeParser: React.FC = () => {
       const response = await axios.post(`${import.meta.env.VITE_SERVER_}/analyze-image`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-      console.log('Server response:', response.data);
       if (response.data.predictions) {
         setImagePredictions(response.data.predictions);
         if (response.data.predictions.length > 0) {
@@ -85,7 +86,6 @@ const RecipeParser: React.FC = () => {
     } catch (error) {
       console.error('Error analyzing image:', error);
       if (axios.isAxiosError(error)) {
-        console.error('Axios error details:', error.response?.data);
         setError(`An error occurred while analyzing the image: ${error.response?.data?.error || error.message}`);
       } else {
         setError('An unexpected error occurred while analyzing the image. Please try again.');
@@ -95,74 +95,131 @@ const RecipeParser: React.FC = () => {
     }
   };
 
+  const handleDownloadPDF = () => {
+    console.log("Downloading PDF...");
+  };
+
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-3xl font-bold mb-4">Recipe Ingredient Parser</h1>
-      <div className="mb-4">
-        <input
-          type="text"
-          value={dishName}
-          onChange={(e) => setDishName(e.target.value)}
-          placeholder="Enter dish name"
-          className="border p-2 mr-2"
-        />
-        <input
-          type="number"
-          value={numPeople}
-          onChange={(e) => setNumPeople(parseInt(e.target.value))}
-          placeholder="Number of people"
-          className="border p-2 mr-2"
-        />
-        <button onClick={handleParseRecipe} className="bg-blue-500 text-white p-2 rounded">
-          Parse Recipe
-        </button>
-      </div>
-      <div className="mb-4">
-        <input
-          type="file"
-          ref={fileInputRef}
-          onChange={handleImageUpload}
-          accept="image/*"
-          className="hidden"
-        />
-        <button onClick={() => fileInputRef.current?.click()} className="bg-green-500 text-white p-2 rounded">
-          Upload Image
-        </button>
-      </div>
+    <div className="container mx-auto p-4 max-w-4xl">
+      <h1 className="text-4xl font-bold mb-8 text-center">Recipe Ingredient Parser</h1>
+      <Card className="mb-8">
+        <CardBody className="p-6">
+          <div className="flex flex-col md:flex-row gap-4 mb-4">
+            <Input
+              label="Enter dish name"
+              value={dishName}
+              onChange={(e) => setDishName(e.target.value)}
+              className="flex-grow"
+            />
+            <Input
+              label="No. Of People"
+              type="number"
+              value={numPeople.toString()}
+              onChange={(e) => setNumPeople(parseInt(e.target.value))}
+              className="w-32"
+            />
+          </div>
+          <div className="flex gap-4">
+            <Button color="primary" onClick={handleParseRecipe}>
+              Parse Recipe
+            </Button>
+            <Button color="secondary" onClick={() => fileInputRef.current?.click()}>
+              Upload Image
+            </Button>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleImageUpload}
+              accept="image/*"
+              className="hidden"
+            />
+          </div>
+        </CardBody>
+      </Card>
+
       {selectedImage && (
-        <img src={URL.createObjectURL(selectedImage)} alt="Selected food" className="max-w-xs mb-4" />
+        <Card className="mb-8">
+          <CardBody>
+            <Image
+              src={URL.createObjectURL(selectedImage)}
+              alt="Selected food"
+              className="object-cover w-full h-[300px]"
+            />
+          </CardBody>
+        </Card>
       )}
+
       {imagePredictions && (
-        <div className="mb-4">
-          <h3 className="text-xl font-bold">Image Predictions:</h3>
-          <ul>
-            {imagePredictions.map((pred, index) => (
-              <li key={index}>
-                {pred.class}: {(pred.probability * 100).toFixed(2)}%
-              </li>
-            ))}
-          </ul>
-        </div>
+        <Card className="mb-8">
+          <CardBody>
+            <h3 className="text-2xl font-bold mb-4">Image Predictions:</h3>
+            <ul className="list-disc pl-6">
+              {imagePredictions.map((pred, index) => (
+                <li key={index} className="mb-2">
+                  <b>{pred.class}:</b> {(pred.probability * 100).toFixed(2)}%
+                </li>
+              ))}
+            </ul>
+          </CardBody>
+        </Card>
       )}
-      {isLoading && <p>Loading...</p>}
-      {error && <p className="text-red-500">{error}</p>}
+
+      {isLoading && (
+        <Card className="mb-8">
+          <CardBody className="flex items-center justify-center">
+            <Spinner size="lg" />
+          </CardBody>
+        </Card>
+      )}
+
+      {error && (
+        <Card className="mb-8">
+          <CardBody className="bg-red-100 text-red-800">
+            <p>{error}</p>
+          </CardBody>
+        </Card>
+      )}
+
       {recipe && (
-        <div>
-          <h2 className="text-2xl font-bold mb-2">{recipe.name}</h2>
-          <p>Servings: {recipe.servings}</p>
-          <h3 className="text-xl font-bold mt-4">Ingredients:</h3>
-          <ul>
-            {recipe.ingredients.map((ingredient, index) => (
-              <li key={index}>{ingredient}</li>
-            ))}
-          </ul>
-          <h3 className="text-xl font-bold mt-4">Instructions:</h3>
-          <ol>
-            {recipe.instructions.map((step, index) => (
-              <li key={index}>{step}</li>
-            ))}
-          </ol>
-        </div>
+        <Card className="mb-8">
+          <CardHeader className="pb-0 pt-6 px-6">
+            <h2 className="text-3xl font-bold">{recipe.name}</h2>
+          </CardHeader>
+          <CardBody className="py-6 px-6">
+            <p className="mb-4"><strong>Servings:</strong> {recipe.servings}</p>
+
+            <h3 className="text-2xl font-bold mt-6 mb-4">Ingredients:</h3>
+            <ul className="list-disc pl-6 mb-6">
+              {recipe.ingredients.map((ingredient, index) => (
+                <li key={index} className="mb-2">{ingredient}</li>
+              ))}
+            </ul>
+
+            <h3 className="text-2xl font-bold mt-6 mb-4">Instructions:</h3>
+            <ol className="list-decimal pl-6 mb-6">
+              {recipe.instructions.map((step, index) => (
+                <li key={index} className="mb-4">{step}</li>
+              ))}
+            </ol>
+
+            <div className="flex gap-4 mt-8">
+              <Button
+                color="success"
+                endContent={<Youtube size={20} />}
+                onClick={() => window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(recipe.name)} recipe`, '_blank')}
+              >
+                Watch Videos
+              </Button>
+              <Button
+                color="warning"
+                endContent={<Download size={20} />}
+                onClick={handleDownloadPDF}
+              >
+                Download PDF
+              </Button>
+            </div>
+          </CardBody>
+        </Card>
       )}
     </div>
   );
