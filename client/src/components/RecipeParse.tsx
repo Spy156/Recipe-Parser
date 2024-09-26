@@ -41,7 +41,7 @@ const RecipeParser: React.FC = () => {
     setRecipe(null);
 
     try {
-      const response = await axios.post(`ADDRESS}/predict`, {
+      const response = await axios.post(`${import.meta.env.VITE_SERVER_ADDRESS}/predict`, {
         dish_name: dishName,
         num_people: numPeople
       });
@@ -71,7 +71,7 @@ const RecipeParser: React.FC = () => {
     formData.append('image', file);
 
     try {
-      const response = await axios.post(`${import.meta.env.VITE_SERVER_}/analyze-image`, formData, {
+      const response = await axios.post(`${import.meta.env.VITE_SERVER_ADDRESS}/analyze-image`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       if (response.data.predictions) {
